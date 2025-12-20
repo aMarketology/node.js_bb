@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="logo">
+                <h1>Tampa Bay</h1>
+                <h2>Concrete Coatings</h2>
+            </div>
+            <ul class="nav-links">
+                <li><a href="/">Home</a></li>
+                <li><a href="/services">Services</a></li>
+                <li><a href="/gallery">Gallery</a></li>
+                <li><a href="/about">About</a></li>
+                <li><a href="/contact">Contact</a></li>
+            </ul>
+            <div class="burger">
+                <div class="line1"></div>
+                <div class="line2"></div>
+                <div class="line3"></div>
+            </div>
+        </div>
+    </nav>
+
+    <%- body %>
+
+    <footer>
+        <div class="footer-container">
+            <div class="footer-top">
+                <div class="footer-services">
+                    <a href="/services">✔ Epoxy Garage Floors</a>
+                    <a href="/services">✔ Metallic Resin floors</a>
+                    <a href="/services">✔ Concrete Polishing</a>
+                </div>
+                <div class="footer-phone">
+                    <a href="tel:(727) 743-7242" class="phone-link">(727) 743-7242</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <div class="footer-logo">
+                    <h1>Tampa Bay</h1>
+                    <h2>Concrete Coatings</h2>
+                </div>
+                <div class="footer-badge">
+                    <p>Serving Florida</p>
+                </div>
+            </div>
+            <div class="footer-copyright">
+                <p>&copy; 2024 Tampa Bay Concrete Coatings. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/js/main.js"></script>
+</body>
+</html>
