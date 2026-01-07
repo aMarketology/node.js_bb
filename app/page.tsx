@@ -4,378 +4,423 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Navigation from './components/Navigation'
 import Footer from './components/Footer'
-import MarketCard from './components/MarketCard'
+import { getFeaturedMatches, getUpcomingMatches, type Match } from '@/lib/fixtures'
 
-interface Market {
-  id: string
-  slug: string
-  question: string
-  description: string
-  outcomes: string[]
-  outcomePrices: string[]
-  volume: string
-  liquidity: string
-  endDate: string
-  image: string
-  active: boolean
-  category?: string
-  tags?: string[]
-  volume24hr?: string
-  createdAt?: string
-}
+// Prism colors for cycling effects
+const prismColors = ['#00CED1', '#3B82F6', '#8B5CF6', '#EC4899', '#FF4757', '#FF6B35', '#FFD700']
 
 export default function Home() {
-  const [markets, setMarkets] = useState<Market[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [activeColor, setActiveColor] = useState(0)
+  const [featuredMatches, setFeaturedMatches] = useState<Match[]>([])
 
+  // Cycle through prism colors
   useEffect(() => {
-    const fetchMarkets = async () => {
-      try {
-        // Use our API route instead of calling Polymarket directly (bypasses CORS)
-        const response = await fetch('/api/markets?limit=12&active=true')
-        
-        if (!response.ok) {
-          throw new Error('Failed to fetch markets')
-        }
+    const interval = setInterval(() => {
+      setActiveColor((prev) => (prev + 1) % prismColors.length)
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [])
 
-        const data = await response.json()
-        
-        // Transform the API response to match our interface
-        const transformedMarkets = data.map((market: any) => ({
-          id: market.id || market.condition_id,
-          slug: market.slug || '',
-          question: market.question || 'Untitled Market',
-          description: market.description || '',
-          outcomes: market.outcomes || ['Yes', 'No'],
-          outcomePrices: market.outcomePrices || market.outcome_prices || ['0.5', '0.5'],
-          volume: market.volume || '0',
-          liquidity: market.liquidity || '0',
-          endDate: market.end_date_iso || market.endDate || market.end_date || '',
-          image: market.image || '',
-          active: market.active ?? true,
-          category: market.category || market.market_slug || '',
-          tags: market.tags || [],
-          volume24hr: market.volume24hr || market.volume_24hr || '0',
-          createdAt: market.created_at || market.createdAt || ''
-        }))
-
-        setMarkets(transformedMarkets)
-        setLoading(false)
-      } catch (err) {
-        console.error('Error fetching markets:', err)
-        setError('Failed to load markets. Please try again later.')
-        setLoading(false)
-      }
-    }
-
-    fetchMarkets()
+  // Load real matches
+  useEffect(() => {
+    const matches = getUpcomingMatches(6)
+    setFeaturedMatches(matches)
   }, [])
 
   return (
-    <div className="min-h-screen bg-black">
+    <div className="min-h-screen bg-dark">
       <Navigation />
 
       {/* === HERO SECTION === */}
-      <section className="relative min-h-[70vh] flex items-center overflow-hidden bg-gradient-to-b from-black via-grey-900 to-black">
-        {/* Background Elements */}
-        <div className="absolute inset-0">
-          <div className="absolute top-1/3 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
-          <div className="absolute bottom-1/3 right-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl" />
+      <section className="relative min-h-screen flex items-center overflow-hidden">
+        {/* Animated Prism Orbs */}
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="prism-orb prism-orb-teal w-[500px] h-[500px] -top-40 -left-40" style={{ animationDelay: '0s' }} />
+          <div className="prism-orb prism-orb-purple w-[400px] h-[400px] top-1/4 right-0" style={{ animationDelay: '2s' }} />
+          <div className="prism-orb prism-orb-pink w-[300px] h-[300px] bottom-1/4 left-1/4" style={{ animationDelay: '4s' }} />
+          <div className="prism-orb prism-orb-gold w-[350px] h-[350px] bottom-0 right-1/4" style={{ animationDelay: '1s' }} />
+          <div className="prism-orb prism-orb-blue w-[250px] h-[250px] top-1/3 left-1/3" style={{ animationDelay: '3s' }} />
+          <div className="prism-orb prism-orb-orange w-[200px] h-[200px] top-20 right-1/3" style={{ animationDelay: '5s' }} />
         </div>
-        
-        {/* Grid Overlay */}
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(133,187,101,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(133,187,101,0.02)_1px,transparent_1px)] bg-[size:100px_100px]" />
 
-        {/* Content Container */}
-        <div className="relative z-10 w-full max-w-7xl mx-auto px-6 lg:px-8 py-20">
-          <div className="text-center space-y-8">
-            
-            {/* Premium Badge */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-            >
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-grey-700 bg-grey-800/50 backdrop-blur-sm">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                <span className="text-xs font-medium text-grey-300 uppercase tracking-widest">Live Prediction Markets</span>
-              </div>
-            </motion.div>
+        {/* Grid Pattern */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(0,206,209,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(139,92,246,0.03)_1px,transparent_1px)] bg-[size:60px_60px]" />
 
-            {/* Main Headline */}
-            <motion.div
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.2 }}
-              className="space-y-4"
-            >
-              <h1 className="text-6xl md:text-8xl lg:text-9xl font-bold bg-gradient-to-r from-primary via-primary-light to-primary bg-clip-text text-transparent leading-tight">
-                Predict Markets
-              </h1>
-              <h2 className="text-3xl md:text-5xl lg:text-6xl font-light text-grey-200">
-                Trade Your Knowledge
-              </h2>
-            </motion.div>
-
-            {/* Description */}
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.4 }}
-              className="text-xl md:text-2xl text-grey-300 font-light leading-relaxed max-w-3xl mx-auto"
-            >
-              The world's largest prediction market platform. Trade on sports, politics, crypto, and more. Your knowledge, your profits.
-            </motion.p>
-
-            {/* CTA Buttons */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.6 }}
-              className="flex flex-col sm:flex-row gap-4 justify-center pt-4"
-            >
-              <a
-                href="#markets"
-                className="inline-flex items-center justify-center gap-3 px-8 py-4 bg-gradient-to-r from-primary to-primary-light rounded-lg font-semibold text-lg text-black hover:shadow-2xl hover:shadow-primary/40 transition-all duration-300"
+        <div className="relative z-10 max-w-7xl mx-auto px-6 py-32">
+          <div className="max-w-4xl mx-auto text-center">
+            <div className="space-y-8">
+              {/* Badge */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6 }}
+                className="flex justify-center"
               >
-                Explore Markets
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </a>
-              
-              <a
-                href="https://polymarket.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-3 px-8 py-4 bg-grey-800/50 border border-grey-700 rounded-lg font-semibold text-lg text-grey-200 hover:bg-grey-700/50 hover:border-grey-600 backdrop-blur-sm transition-all duration-300"
-              >
-                Start Trading
-              </a>
-            </motion.div>
+                <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-dark-200 border border-dark-border relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-gradient-to-r from-prism-teal/10 via-prism-purple/10 to-prism-pink/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div 
+                    className="w-2 h-2 rounded-full animate-pulse relative z-10"
+                    style={{ backgroundColor: prismColors[activeColor] }}
+                  />
+                  <span className="text-sm text-gray-300 font-medium relative z-10">FIFA World Cup 2026™</span>
+                  <div className="w-2 h-2 rounded-full animate-pulse relative z-10" style={{ backgroundColor: prismColors[(activeColor + 3) % 7] }} />
+                </div>
+              </motion.div>
 
-            {/* Stats Row */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.8 }}
-              className="grid grid-cols-3 gap-8 max-w-3xl mx-auto pt-12"
-            >
-              <div className="text-center">
-                <div className="text-3xl md:text-4xl font-bold text-primary mb-2">$100M+</div>
-                <div className="text-sm text-grey-400 uppercase tracking-wider">Daily Volume</div>
-              </div>
-              <div className="text-center">
-                <div className="text-3xl md:text-4xl font-bold text-primary mb-2">1000+</div>
-                <div className="text-sm text-grey-400 uppercase tracking-wider">Active Markets</div>
-              </div>
-              <div className="text-center">
-                <div className="text-3xl md:text-4xl font-bold text-primary mb-2">100K+</div>
-                <div className="text-sm text-grey-400 uppercase tracking-wider">Traders</div>
-              </div>
-            </motion.div>
+              {/* Main Headline */}
+              <motion.div
+                initial={{ opacity: 0, y: 30 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, delay: 0.2 }}
+                className="relative"
+              >
+                {/* Glow effect behind text */}
+                <div className="absolute inset-0 blur-3xl opacity-30">
+                  <div className="prism-gradient-bg h-full" />
+                </div>
+                <h1 className="text-6xl md:text-7xl lg:text-9xl font-black leading-tight relative">
+                  <motion.span 
+                    className="prism-gradient-text block"
+                    animate={{ 
+                      textShadow: [
+                        `0 0 20px ${prismColors[activeColor]}`,
+                        `0 0 40px ${prismColors[(activeColor + 1) % 7]}`,
+                        `0 0 20px ${prismColors[activeColor]}`
+                      ]
+                    }}
+                    transition={{ duration: 2, repeat: Infinity }}
+                  >
+                    PRISM
+                  </motion.span>
+                  <span className="text-white block mt-2">WORLD CUP</span>
+                  <span className="text-gray-400 text-3xl md:text-4xl lg:text-5xl block mt-4 font-bold">2026 Predictions</span>
+                </h1>
+              </motion.div>
+
+              {/* Subtitle */}
+              <motion.p
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, delay: 0.4 }}
+                className="text-xl md:text-2xl text-gray-300 max-w-3xl mx-auto leading-relaxed"
+              >
+                Harness the <span className="text-prism-teal font-semibold">full spectrum</span> of prediction power.
+                <br className="hidden md:block" />
+                <span className="text-prism-purple font-semibold">48 Nations</span>. <span className="text-prism-gold font-semibold">104 Matches</span>. <span className="text-prism-pink font-semibold">Infinite Possibilities</span>.
+              </motion.p>
+
+              {/* CTA Buttons */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, delay: 0.6 }}
+                className="flex flex-col sm:flex-row gap-6 justify-center"
+              >
+                <motion.a
+                  href="#matches"
+                  whileHover={{ scale: 1.08, boxShadow: `0 0 30px ${prismColors[activeColor]}` }}
+                  whileTap={{ scale: 0.95 }}
+                  className="relative px-10 py-5 rounded-2xl font-black text-xl text-white overflow-hidden group shadow-2xl"
+                >
+                  <div className="absolute inset-0 prism-gradient-bg-animated" />
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="prism-gradient-bg animate-pulse" />
+                  </div>
+                  <span className="relative z-10 flex items-center justify-center gap-3">
+                    <span className="text-2xl">⚡</span>
+                    Start Predicting
+                    <svg className="w-6 h-6 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </span>
+                </motion.a>
+
+                <motion.a
+                  href="#how-it-works"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="relative px-10 py-5 rounded-2xl font-bold text-xl text-white bg-dark-200 border-2 prism-border overflow-hidden group"
+                >
+                  <div className="absolute inset-0 prism-gradient-bg opacity-0 group-hover:opacity-10 transition-opacity" />
+                  <span className="relative z-10">How It Works</span>
+                </motion.a>
+              </motion.div>
+
+              {/* Stats */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, delay: 0.8 }}
+                className="grid grid-cols-3 gap-8 pt-12 max-w-4xl mx-auto"
+              >
+                <StatCard value="48" label="Teams" color="prism-teal" icon="🌍" />
+                <StatCard value="104" label="Matches" color="prism-purple" icon="⚽" />
+                <StatCard value="16" label="Host Cities" color="prism-gold" icon="🏟️" />
+              </motion.div>
+
+              {/* Prism Color Wave */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 1, delay: 1 }}
+                className="flex justify-center gap-3 pt-8"
+              >
+                {prismColors.map((color, i) => (
+                  <motion.div
+                    key={i}
+                    className="w-3 h-16 rounded-full"
+                    style={{ backgroundColor: color }}
+                    animate={{
+                      height: [64, 96, 64],
+                      boxShadow: [
+                        `0 0 10px ${color}`,
+                        `0 0 30px ${color}`,
+                        `0 0 10px ${color}`
+                      ]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      delay: i * 0.2,
+                      ease: 'easeInOut'
+                    }}
+                  />
+                ))}
+              </motion.div>
+            </div>
           </div>
         </div>
+
+        {/* Scroll indicator */}
+        <motion.div
+          animate={{ y: [0, 10, 0] }}
+          transition={{ duration: 2, repeat: Infinity }}
+          className="absolute bottom-8 left-1/2 -translate-x-1/2"
+        >
+          <div className="w-6 h-10 rounded-full border-2 border-gray-600 flex items-start justify-center p-2">
+            <div className="w-1.5 h-3 rounded-full prism-gradient-bg" />
+          </div>
+        </motion.div>
       </section>
 
-      {/* === MARKETS SECTION === */}
-      <section id="markets" className="relative py-24 bg-black">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          
+      {/* === FEATURED MATCHES === */}
+      <section id="matches" className="relative py-24 bg-dark-100">
+        {/* Section background orbs */}
+        <div className="absolute top-0 right-0 w-96 h-96 prism-orb prism-orb-purple opacity-20" />
+        <div className="absolute bottom-0 left-0 w-80 h-80 prism-orb prism-orb-teal opacity-20" />
+
+        <div className="relative max-w-7xl mx-auto px-6">
           {/* Section Header */}
           <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-grey-700 bg-grey-800/50 backdrop-blur-sm mb-6">
-              <span className="text-xs font-medium text-grey-300 uppercase tracking-widest">Trending Now</span>
-            </div>
-            <h2 className="text-4xl md:text-6xl font-bold text-grey-50 mb-4">
-              Active <span className="text-primary">Prediction Markets</span>
-            </h2>
-            <p className="text-xl text-grey-300 max-w-3xl mx-auto">
-              Trade on real-world events with real money. Make predictions on politics, sports, crypto, and more.
-            </p>
-          </div>
-
-          {/* Loading State */}
-          {loading && (
-            <div className="text-center py-20">
-              <div className="inline-block w-16 h-16 border-4 border-grey-700 border-t-primary rounded-full animate-spin mb-4" />
-              <p className="text-grey-400 text-lg">Loading markets...</p>
-            </div>
-          )}
-
-          {/* Error State */}
-          {error && (
-            <div className="text-center py-20">
-              <div className="inline-flex items-center gap-3 px-6 py-4 bg-danger/10 border border-danger/30 rounded-lg text-danger mb-4">
-                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-                <span className="font-medium">{error}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Markets Grid - 3 per row */}
-          {!loading && !error && markets.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {markets.map((market, index) => (
-                <MarketCard key={market.id} market={market} index={index} />
-              ))}
-            </div>
-          )}
-
-          {/* View All CTA */}
-          {!loading && !error && markets.length > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.8, delay: 0.4 }}
-              className="text-center mt-16"
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-dark-200 border border-dark-border mb-6"
             >
-              <a
-                href="https://polymarket.com/markets"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-3 px-10 py-5 bg-gradient-to-r from-primary to-primary-light rounded-lg font-semibold text-lg text-black hover:shadow-2xl hover:shadow-primary/40 transition-all duration-300"
-              >
-                View All Markets
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                </svg>
-              </a>
+              <span className="text-prism-teal">⚽</span>
+              <span className="text-sm text-gray-300">Featured Matches</span>
             </motion.div>
-          )}
+            
+            <motion.h2
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.1 }}
+              className="text-4xl md:text-5xl font-bold text-white mb-4"
+            >
+              Make Your <span className="prism-gradient-text">Predictions</span>
+            </motion.h2>
+            
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.2 }}
+              className="text-gray-400 max-w-2xl mx-auto"
+            >
+              Choose from hundreds of markets across all World Cup matches. 
+              The prism reveals all possibilities.
+            </motion.p>
+          </div>
+
+          {/* Matches Grid */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {featuredMatches.length > 0 ? (
+              featuredMatches.map((match, index) => (
+                <MatchCard key={match.id} match={match} index={index} />
+              ))
+            ) : (
+              <div className="col-span-3 text-center py-12">
+                <p className="text-gray-400">Loading matches...</p>
+              </div>
+            )}
+          </div>
+
+          {/* View All Button */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mt-12"
+          >
+            <a
+              href="#"
+              className="inline-flex items-center gap-2 text-prism-teal hover:text-prism-teal-light transition-colors"
+            >
+              View All Matches
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </a>
+          </motion.div>
         </div>
       </section>
 
-      {/* === HOW IT WORKS SECTION === */}
-      <section className="relative py-24 bg-gradient-to-b from-black via-grey-900 to-black">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          
+      {/* === HOW IT WORKS === */}
+      <section id="how-it-works" className="relative py-24 bg-dark">
+        <div className="max-w-7xl mx-auto px-6">
           {/* Section Header */}
-          <div className="text-center mb-20">
-            <h2 className="text-4xl md:text-5xl font-bold text-grey-50 mb-4">
-              How It <span className="text-primary">Works</span>
-            </h2>
-            <p className="text-xl text-grey-300 max-w-2xl mx-auto">
-              Start trading in minutes. It's simple, transparent, and secure.
-            </p>
+          <div className="text-center mb-16">
+            <motion.h2
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="text-4xl md:text-5xl font-bold text-white mb-4"
+            >
+              How <span className="prism-gradient-text">Prism</span> Works
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.1 }}
+              className="text-gray-400 max-w-2xl mx-auto"
+            >
+              Three simple steps to harness the power of prediction
+            </motion.p>
           </div>
 
-          {/* Steps Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          {/* Steps */}
+          <div className="grid md:grid-cols-3 gap-8">
             {[
               {
                 step: '01',
-                title: 'Choose a Market',
-                description: 'Browse hundreds of markets on politics, sports, crypto, and current events.',
-                icon: (
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                )
+                title: 'Choose Your Match',
+                description: 'Browse group stage, knockouts, or special markets.',
+                icon: '🎯',
+                color: 'prism-teal',
               },
               {
                 step: '02',
-                title: 'Make Your Prediction',
-                description: 'Buy shares for Yes or No based on your knowledge and research.',
-                icon: (
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                )
+                title: 'Make Predictions',
+                description: 'Pick winners, scores, or player props with confidence.',
+                icon: '⚡',
+                color: 'prism-purple',
               },
               {
                 step: '03',
-                title: 'Win Money',
-                description: 'When the market resolves, winning shares pay out $1.00 each. Profit from being right.',
-                icon: (
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                )
-              }
+                title: 'Win Rewards',
+                description: 'Collect your winnings when predictions come true.',
+                icon: '🏆',
+                color: 'prism-gold',
+              },
             ].map((item, index) => (
               <motion.div
                 key={index}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: index * 0.2 }}
                 viewport={{ once: true }}
-                className="relative p-8 rounded-2xl bg-grey-900/50 border border-grey-700 hover:border-primary/50 transition-all duration-300"
+                transition={{ delay: index * 0.2 }}
+                className="relative group"
               >
-                {/* Step Number */}
-                <div className="absolute -top-4 left-8 px-4 py-1 bg-primary text-black font-bold text-sm rounded-full">
-                  {item.step}
+                <div className="prism-card rounded-2xl p-8 h-full">
+                  {/* Step number */}
+                  <div className={`text-5xl font-black text-${item.color} opacity-20 mb-4`}>
+                    {item.step}
+                  </div>
+                  
+                  {/* Icon */}
+                  <div className="text-4xl mb-4">{item.icon}</div>
+                  
+                  {/* Content */}
+                  <h3 className={`text-xl font-bold text-white mb-2 group-hover:text-${item.color} transition-colors`}>
+                    {item.title}
+                  </h3>
+                  <p className="text-gray-400">{item.description}</p>
                 </div>
-
-                {/* Icon */}
-                <div className="w-16 h-16 mb-6 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-                  {item.icon}
-                </div>
-
-                {/* Content */}
-                <h3 className="text-2xl font-bold text-grey-50 mb-4">{item.title}</h3>
-                <p className="text-grey-300 leading-relaxed">{item.description}</p>
               </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* === FINAL CTA SECTION === */}
-      <section className="relative py-32 bg-gradient-to-b from-black to-grey-900 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(133,187,101,0.15),transparent_50%)]" />
-        
-        <div className="relative max-w-5xl mx-auto px-6 lg:px-8 text-center">
-          <h2 className="text-4xl md:text-6xl font-bold text-grey-50 mb-6">
-            Ready to Start
-            <br />
-            <span className="text-primary">Trading?</span>
-          </h2>
-          
-          <p className="text-xl text-grey-300 mb-12 max-w-2xl mx-auto">
-            Join thousands of traders making predictions on real-world events. Your knowledge has value.
-          </p>
+      {/* === CTA SECTION === */}
+      <section className="relative py-32 overflow-hidden">
+        {/* Prism background effect */}
+        <div className="absolute inset-0">
+          <div className="absolute inset-0 prism-gradient-bg opacity-10" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] prism-orb prism-orb-purple opacity-30" />
+        </div>
 
-          {/* CTA Button */}
-          <a
-            href="https://polymarket.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-3 px-12 py-6 bg-gradient-to-r from-primary to-primary-light rounded-lg font-bold text-xl text-black hover:shadow-2xl hover:shadow-primary/50 transition-all duration-300"
+        <div className="relative max-w-4xl mx-auto px-6 text-center">
+          <motion.h2
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-4xl md:text-6xl font-bold text-white mb-6"
           >
-            Start Trading Now
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-            </svg>
-          </a>
+            Ready to Enter the
+            <br />
+            <span className="prism-gradient-text">Prism?</span>
+          </motion.h2>
 
-          {/* Trust Indicators */}
-          <div className="mt-16 pt-8 border-t border-grey-800">
-            <p className="text-grey-500 text-sm mb-4">Powered by Polymarket</p>
-            <div className="flex flex-wrap items-center justify-center gap-8 text-grey-600 text-xs">
-              <span className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-primary" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                Secure
-              </span>
-              <span className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-primary" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                Transparent
-              </span>
-              <span className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-primary" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                </svg>
-                Decentralized
-              </span>
-            </div>
-          </div>
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.1 }}
+            className="text-xl text-gray-400 mb-12"
+          >
+            Join thousands predicting the greatest tournament in history.
+          </motion.p>
+
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.2 }}
+          >
+            <a
+              href="#matches"
+              className="relative inline-flex items-center gap-3 px-12 py-6 rounded-2xl font-bold text-xl text-white overflow-hidden group"
+            >
+              <div className="absolute inset-0 prism-gradient-bg-animated" />
+              <span className="relative z-10">Start Predicting Now</span>
+              <svg className="relative z-10 w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </a>
+          </motion.div>
+
+          {/* Trust indicators */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.3 }}
+            className="mt-12 flex flex-wrap justify-center gap-8 text-gray-500 text-sm"
+          >
+            <span className="flex items-center gap-2">
+              <span className="text-prism-teal">✓</span> Blockchain Secured
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="text-prism-purple">✓</span> Instant Payouts
+            </span>
+            <span className="flex items-center gap-2">
+              <span className="text-prism-gold">✓</span> 48 Nations
+            </span>
+          </motion.div>
         </div>
       </section>
 
@@ -383,3 +428,187 @@ export default function Home() {
     </div>
   )
 }
+
+// Stat Card Component
+function StatCard({ value, label, color, icon }: { value: string; label: string; color: string; icon?: string }) {
+  return (
+    <motion.div 
+      whileHover={{ scale: 1.05, y: -5 }}
+      className="relative group"
+    >
+      <div className="absolute inset-0 prism-gradient-bg opacity-0 group-hover:opacity-20 rounded-2xl blur-xl transition-opacity" />
+      <div className="relative text-center p-6 rounded-2xl bg-dark-200 border-2 prism-border">
+        {icon && <div className="text-4xl mb-3">{icon}</div>}
+        <div className={`text-3xl md:text-4xl font-black text-${color} mb-2`}>{value}</div>
+        <div className="text-sm text-gray-400 uppercase tracking-wider font-bold">{label}</div>
+      </div>
+    </motion.div>
+  )
+}
+
+// Match Card Component
+function MatchCard({ match, index }: { match: Match; index: number }) {
+  const borderColors = [
+    'hover:border-prism-teal',
+    'hover:border-prism-purple',
+    'hover:border-prism-pink'
+  ]
+  
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ delay: index * 0.1 }}
+      whileHover={{ y: -8, scale: 1.02 }}
+      className="group"
+    >
+      <div className={`prism-card rounded-2xl overflow-hidden ${borderColors[index % 3]} transition-all duration-500 shadow-2xl hover:shadow-3xl relative`}>
+        {/* Animated gradient overlay */}
+        <div className="absolute inset-0 prism-gradient-bg opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none" />
+        
+        {/* Header */}
+        <div className="relative p-4 border-b border-dark-border bg-dark-200/50 backdrop-blur-sm">
+          <div className="flex justify-between items-center">
+            <motion.span 
+              className="text-xs font-bold px-3 py-1 rounded-full bg-prism-teal/20 text-prism-teal border border-prism-teal/50"
+              whileHover={{ scale: 1.1 }}
+            >
+              {match.group}
+            </motion.span>
+            <span className="text-xs text-gray-400 font-medium">{match.date}</span>
+          </div>
+        </div>
+
+        {/* Teams */}
+        <div className="relative p-6">
+          <div className="flex items-center justify-between mb-6">
+            {/* Home Team */}
+            <motion.div 
+              className="text-center flex-1"
+              whileHover={{ scale: 1.1 }}
+            >
+              <motion.div 
+                className="text-5xl mb-3 filter drop-shadow-lg"
+                animate={{ rotateY: [0, 10, 0] }}
+                transition={{ duration: 3, repeat: Infinity }}
+              >
+                {match.homeFlag}
+              </motion.div>
+              <div className="text-white font-bold text-sm px-2">{match.homeTeam}</div>
+            </motion.div>
+
+            {/* VS with prism effect */}
+            <div className="px-4 relative">
+              <motion.div
+                className="absolute inset-0 -m-2"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+              >
+                <div className="w-12 h-12 rounded-full prism-gradient-bg opacity-20 blur-md" />
+              </motion.div>
+              <span className="relative z-10 text-white font-black text-lg prism-gradient-text">VS</span>
+            </div>
+
+            {/* Away Team */}
+            <motion.div 
+              className="text-center flex-1"
+              whileHover={{ scale: 1.1 }}
+            >
+              <motion.div 
+                className="text-5xl mb-3 filter drop-shadow-lg"
+                animate={{ rotateY: [0, -10, 0] }}
+                transition={{ duration: 3, repeat: Infinity, delay: 1.5 }}
+              >
+                {match.awayFlag}
+              </motion.div>
+              <div className="text-white font-bold text-sm px-2">{match.awayTeam}</div>
+            </motion.div>
+          </div>
+
+          {/* Odds */}
+          <div className="grid grid-cols-3 gap-3">
+            <OddsButton label="Home" odds={match.homeOdds || 0} color="teal" />
+            <OddsButton label="Draw" odds={match.drawOdds || 0} color="purple" />
+            <OddsButton label="Away" odds={match.awayOdds || 0} color="pink" />
+          </div>
+
+          {/* Total Bets */}
+          {match.totalBets && (
+            <motion.div 
+              className="mt-4 pt-4 border-t border-dark-border"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+            >
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-500">
+                  <span className="text-prism-teal font-bold">{match.totalBets.toLocaleString()}</span> bets
+                </span>
+                <span className="text-prism-gold font-bold">
+                  ${(match.totalBets * 10).toLocaleString()}
+                </span>
+              </div>
+              {/* Live indicator */}
+              <motion.div 
+                className="flex items-center gap-2 mt-2 text-xs"
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 2, repeat: Infinity }}
+              >
+                <div className="w-2 h-2 rounded-full bg-prism-teal animate-pulse" />
+                <span className="text-prism-teal font-medium">Live Betting</span>
+              </motion.div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="relative px-6 py-4 bg-dark-200/50 border-t border-dark-border backdrop-blur-sm">
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-gray-400 flex items-center gap-2">
+              <span className="text-base">📍</span> {match.city}
+            </span>
+            <motion.button 
+              whileHover={{ scale: 1.05, x: 5 }}
+              whileTap={{ scale: 0.95 }}
+              className="text-sm font-bold prism-gradient-text flex items-center gap-1"
+            >
+              Bet Now
+              <motion.svg 
+                className="w-4 h-4" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+                animate={{ x: [0, 5, 0] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </motion.svg>
+            </motion.button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+// Odds Button Component
+function OddsButton({ label, odds, color }: { label: string; odds: number; color: string }) {
+  const colorClasses = {
+    teal: 'hover:bg-prism-teal/30 hover:border-prism-teal hover:text-white text-prism-teal hover:shadow-lg hover:shadow-prism-teal/50',
+    purple: 'hover:bg-prism-purple/30 hover:border-prism-purple hover:text-white text-prism-purple hover:shadow-lg hover:shadow-prism-purple/50',
+    pink: 'hover:bg-prism-pink/30 hover:border-prism-pink hover:text-white text-prism-pink hover:shadow-lg hover:shadow-prism-pink/50',
+  }
+
+  return (
+    <motion.button
+      whileHover={{ scale: 1.05, y: -2 }}
+      whileTap={{ scale: 0.95 }}
+      className={`p-4 rounded-xl bg-dark-200 border-2 border-dark-border transition-all duration-300 ${colorClasses[color as keyof typeof colorClasses]}`}
+    >
+      <div className="text-[10px] text-gray-500 uppercase mb-1 font-bold tracking-wider">{label}</div>
+      <div className="font-black text-lg">{odds.toFixed(2)}x</div>
+    </motion.button>
+  )
+}
+
