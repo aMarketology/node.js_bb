@@ -157,50 +157,9 @@ export default function Home() {
                 <StatCard value="104" label="Matches" color="prism-purple" icon="⚽" />
                 <StatCard value="16" label="Host Cities" color="prism-gold" icon="🏟️" />
               </motion.div>
-
-              {/* Prism Color Wave */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 1, delay: 1 }}
-                className="flex justify-center gap-3 pt-8"
-              >
-                {prismColors.map((color, i) => (
-                  <motion.div
-                    key={i}
-                    className="w-3 h-16 rounded-full"
-                    style={{ backgroundColor: color }}
-                    animate={{
-                      height: [64, 96, 64],
-                      boxShadow: [
-                        `0 0 10px ${color}`,
-                        `0 0 30px ${color}`,
-                        `0 0 10px ${color}`
-                      ]
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      delay: i * 0.2,
-                      ease: 'easeInOut'
-                    }}
-                  />
-                ))}
-              </motion.div>
             </div>
           </div>
         </div>
-
-        {/* Scroll indicator */}
-        <motion.div
-          animate={{ y: [0, 10, 0] }}
-          transition={{ duration: 2, repeat: Infinity }}
-          className="absolute bottom-8 left-1/2 -translate-x-1/2"
-        >
-          <div className="w-6 h-10 rounded-full border-2 border-gray-600 flex items-start justify-center p-2">
-            <div className="w-1.5 h-3 rounded-full prism-gradient-bg" />
-          </div>
-        </motion.div>
       </section>
 
       {/* === FEATURED MATCHES === */}
@@ -212,36 +171,20 @@ export default function Home() {
         <div className="relative max-w-7xl mx-auto px-6">
           {/* Section Header */}
           <div className="text-center mb-16">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-dark-200 border border-dark-border mb-6"
-            >
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-dark-200 border border-dark-border mb-6">
+            
               <span className="text-prism-teal">⚽</span>
               <span className="text-sm text-gray-300">Featured Matches</span>
-            </motion.div>
+            </div>
             
-            <motion.h2
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.1 }}
-              className="text-4xl md:text-5xl font-bold text-white mb-4"
-            >
+            <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
               Make Your <span className="prism-gradient-text">Predictions</span>
-            </motion.h2>
+            </h2>
             
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: 0.2 }}
-              className="text-gray-400 max-w-2xl mx-auto"
-            >
+            <p className="text-gray-400 max-w-2xl mx-auto">
               Choose from hundreds of markets across all World Cup matches. 
               The prism reveals all possibilities.
-            </motion.p>
+            </p>
           </div>
 
           {/* Matches Grid */}
@@ -463,7 +406,7 @@ function MatchCard({ match, index }: { match: Match; index: number }) {
       whileHover={{ y: -8, scale: 1.02 }}
       className="group"
     >
-      <div className={`prism-card rounded-2xl overflow-hidden ${borderColors[index % 3]} transition-all duration-500 shadow-2xl hover:shadow-3xl relative`}>
+      <a href={`/markets/${match.id}`} className={`block prism-card rounded-2xl overflow-hidden ${borderColors[index % 3]} transition-all duration-500 shadow-2xl hover:shadow-3xl relative`}>
         {/* Animated gradient overlay */}
         <div className="absolute inset-0 prism-gradient-bg opacity-0 group-hover:opacity-5 transition-opacity pointer-events-none" />
         
@@ -568,7 +511,7 @@ function MatchCard({ match, index }: { match: Match; index: number }) {
             <span className="text-xs text-gray-400 flex items-center gap-2">
               <span className="text-base">📍</span> {match.city}
             </span>
-            <motion.button 
+            <motion.div
               whileHover={{ scale: 1.05, x: 5 }}
               whileTap={{ scale: 0.95 }}
               className="text-sm font-bold prism-gradient-text flex items-center gap-1"
@@ -584,10 +527,10 @@ function MatchCard({ match, index }: { match: Match; index: number }) {
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </motion.svg>
-            </motion.button>
+            </motion.div>
           </div>
         </div>
-      </div>
+      </a>
     </motion.div>
   )
 }

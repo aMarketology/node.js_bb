@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { AuthProvider } from './contexts/AuthContext'
 
 export const metadata: Metadata = {
-  title: 'World Cup 2026 Predictions | Prism Markets',
-  description: 'The ultimate prediction market for FIFA World Cup 2026. Bet on matches, player props, and tournament outcomes with the power of blockchain.',
-  keywords: ['World Cup 2026', 'prediction market', 'sports betting', 'FIFA', 'soccer predictions'],
+  title: 'Prism World Cup 2026 | Prediction Market',
+  description: 'The ultimate prediction market for FIFA World Cup 2026. Powered by Prism blockchain technology.',
+  keywords: ['World Cup 2026', 'prediction market', 'sports betting', 'FIFA', 'blockchain'],
 }
 
 export default function RootLayout({
@@ -14,7 +15,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
     </html>
   )
 }

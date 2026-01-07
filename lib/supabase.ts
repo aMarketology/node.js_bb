@@ -22,6 +22,8 @@ export interface UserProfile {
   total_bets: number
   total_winnings: number
   win_rate: number
+  kyc_verified: boolean
+  kyc_status: 'pending' | 'approved' | 'rejected' | 'bypassed_testing'
   created_at: string
   updated_at: string
 }
@@ -353,16 +355,60 @@ export function subscribeToMatchStats(matchId: string, callback: (stats: MatchSt
 -- User Profiles Table
 CREATE TABLE user_profiles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  wallet_address TEXT UNIQUE NOT NULL,
+  wallet_address TEXT UNIQUE,
   username TEXT,
   email TEXT,
   avatar_url TEXT,
   total_bets INTEGER DEFAULT 0,
   total_winnings NUMERIC DEFAULT 0,
   win_rate NUMERIC DEFAULT 0,
+  kyc_verified BOOLEAN DEFAULT FALSE,
+  kyc_status TEXT DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'approved', 'rejected', 'bypassed_testing')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- KYC Submissions Table
+CREATE TABLE kyc_submissions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES user_profiles(id) ON DELETE CASCADE,
+  first_name TEXT NOT NULL,
+  middle_name TEXT,
+  last_name TEXT NOT NULL,
+  date_of_birth DATE NOT NULL,
+  ssn_last_4 TEXT,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  street_address TEXT,
+  apartment_unit TEXT,
+  city TEXT,
+  state TEXT,
+  zip_code TEXT,
+  country TEXT DEFAULT 'United States',
+  id_type TEXT CHECK (id_type IN ('drivers_license', 'passport', 'state_id')),
+  id_number TEXT,
+  id_expiration_date DATE,
+  id_front_url TEXT,
+  id_back_url TEXT,
+  selfie_url TEXT,
+  proof_of_address_url TEXT,
+  source_of_funds TEXT,
+  estimated_annual_income TEXT,
+  net_worth TEXT,
+  employment_status TEXT,
+  employer TEXT,
+  is_us_citizen BOOLEAN DEFAULT FALSE,
+  is_politically_exposed BOOLEAN DEFAULT FALSE,
+  kyc_status TEXT DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'approved', 'rejected', 'bypassed_testing', 'under_review')),
+  rejection_reason TEXT,
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  reviewed_by UUID,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Storage bucket for KYC documents
+INSERT INTO storage.buckets (id, name, public) VALUES ('kyc-documents', 'kyc-documents', false);
 
 -- Bet Records Table
 CREATE TABLE bet_records (
