@@ -1,12 +1,13 @@
 {
-  "name": "concrete-coatings-website",
+  "name": "prism-prediction-market",
   "version": "1.0.0",
-  "description": "Tampa Bay Concrete Coatings - Professional concrete coating services",
+  "description": "PRISM - The ultimate World Cup 2026 prediction market powered by BlackBook blockchain. Experience the rainbow of possibilities.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:markets": "node test-markets.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
@@ -15,7 +16,8 @@
     "next-seo": "^7.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-intersection-observer": "^10.0.0"
+    "react-intersection-observer": "^10.0.0",
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -23,6 +25,7 @@
     "@types/react-dom": "^18.2.0",
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0",
+    "supabase": "^2.71.3",
     "tailwindcss": "^3.3.0",
     "typescript": "^5.3.0"
   }

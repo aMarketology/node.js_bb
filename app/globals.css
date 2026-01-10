@@ -213,3 +213,49 @@ html {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+
+/* === FRACTAL CURSOR TRAIL === */
+.fractal-particle {
+  position: fixed;
+  pointer-events: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  z-index: 9999;
+  mix-blend-mode: screen;
+  animation: fractal-fade 1.5s ease-out forwards;
+}
+
+@keyframes fractal-fade {
+  0% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.3) rotate(720deg);
+  }
+}
+
+.fractal-wave {
+  position: fixed;
+  pointer-events: none;
+  border-radius: 50%;
+  border: 2px solid;
+  z-index: 9998;
+  mix-blend-mode: screen;
+  animation: fractal-wave-expand 1s ease-out forwards;
+}
+
+@keyframes fractal-wave-expand {
+  0% {
+    width: 20px;
+    height: 20px;
+    opacity: 0.8;
+  }
+  100% {
+    width: 100px;
+    height: 100px;
+    opacity: 0;
+  }
+}

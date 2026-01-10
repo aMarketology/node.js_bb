@@ -1,31 +1,54 @@
 // Supabase Configuration and Database Integration
 // Handles user authentication, profiles, and bet history storage
+// Uses existing BlackBook blockchain profile structure
 
 import { createClient } from '@supabase/supabase-js'
-
-// TODO: Add your Supabase credentials to .env.local:
-// NEXT_PUBLIC_SUPABASE_URL=your-project-url
-// NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-// Database Types
+// Service role client for admin operations
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+export const supabaseAdmin = supabaseServiceKey 
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : supabase
+
+// Database Types - Matches existing profiles table structure
 export interface UserProfile {
-  id: string
-  wallet_address: string
-  username?: string
-  email?: string
-  avatar_url?: string
-  total_bets: number
-  total_winnings: number
-  win_rate: number
-  kyc_verified: boolean
-  kyc_status: 'pending' | 'approved' | 'rejected' | 'bypassed_testing'
-  created_at: string
-  updated_at: string
+  user_id: string                    // Primary key - username
+  auth_id?: string                   // Supabase auth.users UUID (for user_vaults FK)
+  email: string
+  reputation_score: number
+  follower_count: number
+  following_count: number
+  post_count: number
+  salt: string                       // Vault encryption salt
+  encrypted_blob: string             // Encrypted wallet vault (mnemonic)
+  blackbook_address: string          // L1 blockchain address
+  last_login: string
+  public_key: string                 // User's public key
+  // Extended fields for betting (will add to DB)
+  total_bets?: number
+  total_winnings?: number
+  win_rate?: number
+  kyc_verified?: boolean
+  kyc_status?: 'pending' | 'approved' | 'rejected' | 'bypassed_testing'
+}
+
+// WalletVault interface is defined below in the WALLET VAULT FUNCTIONS section
+
+// Public profile view (no sensitive data)
+export interface PublicProfile {
+  user_id: string
+  email: string
+  reputation_score: number
+  follower_count: number
+  following_count: number
+  post_count: number
+  blackbook_address: string
+  last_login: string
 }
 
 export interface BetRecord {
@@ -58,79 +81,139 @@ export interface MatchStats {
 }
 
 // Authentication Functions
-export async function signInWithWallet(walletAddress: string) {
+// Sign in with BlackBook wallet address (L1 blockchain)
+export async function signInWithWallet(blackbookAddress: string) {
   try {
-    // Check if user exists
+    // Check if user exists by blackbook_address
     const { data: existingUser, error: fetchError } = await supabase
-      .from('user_profiles')
+      .from('profiles')
       .select('*')
-      .eq('wallet_address', walletAddress)
+      .eq('blackbook_address', blackbookAddress)
       .single()
 
     if (fetchError && fetchError.code !== 'PGRST116') {
       throw fetchError
     }
 
-    // Create user if doesn't exist
-    if (!existingUser) {
-      const { data: newUser, error: createError } = await supabase
-        .from('user_profiles')
-        .insert({
-          wallet_address: walletAddress,
-          username: `Player${walletAddress.substring(2, 8)}`,
-          total_bets: 0,
-          total_winnings: 0,
-          win_rate: 0,
-        })
-        .select()
-        .single()
-
-      if (createError) throw createError
-      return newUser
+    if (existingUser) {
+      // Update last login
+      await supabase
+        .from('profiles')
+        .update({ last_login: new Date().toISOString() })
+        .eq('user_id', existingUser.user_id)
+      
+      return existingUser
     }
 
-    return existingUser
+    // User doesn't exist - they need to sign up first
+    return null
   } catch (error) {
-    console.error('Error signing in:', error)
+    console.error('Error signing in with wallet:', error)
     return null
   }
 }
 
 export async function signInWithEmail(email: string, password: string) {
   try {
+    console.log('Attempting sign in for:', email)
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
-    if (error) throw error
+    if (error) {
+      console.error('Supabase auth error:', error.message)
+      throw error
+    }
+    
+    console.log('Auth successful, user:', data.user?.id)
+    
+    // Also load their profile from profiles table
+    if (data.user) {
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', email)
+        .single()
+      
+      if (profileError) {
+        console.error('Profile fetch error:', profileError)
+      }
+      
+      if (profile) {
+        console.log('Profile found:', profile.user_id)
+        
+        // Backfill auth_id if missing
+        if (!profile.auth_id) {
+          console.log('⚠️ Backfilling missing auth_id for profile:', profile.user_id)
+          await supabase
+            .from('profiles')
+            .update({ auth_id: data.user.id })
+            .eq('user_id', profile.user_id)
+        }
+        
+        // Update last login
+        await supabase
+          .from('profiles')
+          .update({ last_login: new Date().toISOString() })
+          .eq('user_id', profile.user_id)
+      } else {
+        console.warn('No profile found for email:', email)
+      }
+    }
+    
     return data
-  } catch (error) {
-    console.error('Error signing in with email:', error)
+  } catch (error: any) {
+    console.error('Error signing in with email:', error?.message || error)
     return null
   }
 }
 
-export async function signUpWithEmail(email: string, password: string, walletAddress?: string) {
+export async function signUpWithEmail(email: string, password: string, username?: string, blackbookAddress?: string) {
   try {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        // Skip email confirmation - sign in immediately
+        emailRedirectTo: undefined,
+      }
     })
 
     if (error) throw error
 
-    // Create profile
+    // Create profile in profiles table
     if (data.user) {
-      await supabase.from('user_profiles').insert({
-        id: data.user.id,
-        wallet_address: walletAddress || '',
-        email,
-        username: `Player${data.user.id.substring(0, 6)}`,
-        total_bets: 0,
-        total_winnings: 0,
-        win_rate: 0,
-      })
+      const authId = data.user.id // Store the auth UUID
+      const userId = username || `user_${authId.substring(0, 8)}`
+      
+      // Check if profile already exists (in case of re-signup)
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('email', email)
+        .single()
+      
+      if (!existingProfile) {
+        const { error: profileError } = await supabase.from('profiles').insert({
+          user_id: userId,
+          auth_id: authId, // Store the Supabase auth UUID
+          email: email,
+          reputation_score: 100,
+          follower_count: 0,
+          following_count: 0,
+          post_count: 0,
+          salt: '',
+          encrypted_blob: '',
+          blackbook_address: blackbookAddress || '',
+          last_login: new Date().toISOString(),
+          public_key: '',
+        })
+        
+        if (profileError) {
+          console.error('Error creating profile:', profileError)
+        }
+      }
     }
 
     return data
@@ -151,16 +234,69 @@ export async function signOut() {
   }
 }
 
-// User Profile Functions
-export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+// Password Reset Functions
+export async function resetPasswordForEmail(email: string) {
   try {
-    const { data, error } = await supabase
-      .from('user_profiles')
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    
+    if (error) throw error
+    return true
+  } catch (error: any) {
+    console.error('Error sending password reset email:', error?.message || error)
+    return false
+  }
+}
+
+export async function updatePassword(newPassword: string) {
+  try {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword
+    })
+    
+    if (error) throw error
+    return true
+  } catch (error: any) {
+    console.error('Error updating password:', error?.message || error)
+    return false
+  }
+}
+
+// User Profile Functions
+// Get profile by user_id (username) or email
+export async function getUserProfile(identifier: string): Promise<UserProfile | null> {
+  try {
+    // First try by user_id
+    let { data, error } = await supabase
+      .from('profiles')
       .select('*')
-      .eq('id', userId)
+      .eq('user_id', identifier)
       .single()
 
-    if (error) throw error
+    // If not found, try by email
+    if (error && error.code === 'PGRST116') {
+      const result = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('email', identifier)
+        .single()
+      
+      data = result.data
+      error = result.error
+    }
+
+    if (error && error.code !== 'PGRST116') throw error
+    
+    if (data) {
+      console.log('👤 getUserProfile result:', {
+        user_id: data.user_id,
+        auth_id: data.auth_id,
+        email: data.email,
+        has_auth_id: !!data.auth_id
+      })
+    }
+    
     return data
   } catch (error) {
     console.error('Error fetching profile:', error)
@@ -168,12 +304,29 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   }
 }
 
+// Get profile by blackbook address
+export async function getProfileByWallet(blackbookAddress: string): Promise<UserProfile | null> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('blackbook_address', blackbookAddress)
+      .single()
+
+    if (error && error.code !== 'PGRST116') throw error
+    return data
+  } catch (error) {
+    console.error('Error fetching profile by wallet:', error)
+    return null
+  }
+}
+
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>) {
   try {
     const { data, error } = await supabase
-      .from('user_profiles')
+      .from('profiles')
       .update(updates)
-      .eq('id', userId)
+      .eq('user_id', userId)
       .select()
       .single()
 
@@ -184,6 +337,9 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
     return null
   }
 }
+
+// Wallet Vault Functions are defined below in the WALLET VAULT FUNCTIONS section
+// storeWalletVault, getWalletVault, userHasWallet/hasWallet
 
 // Bet Functions
 export async function saveBet(bet: Omit<BetRecord, 'id' | 'created_at' | 'updated_at'>) {
@@ -329,6 +485,203 @@ export function subscribeToBets(matchId: string, callback: (bet: BetRecord) => v
       }
     )
     .subscribe()
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WALLET VAULT FUNCTIONS
+// Store encrypted wallet vaults in Supabase (host-proof encryption)
+// ═══════════════════════════════════════════════════════════════
+
+export interface WalletVault {
+  user_id: string             // Profile user_id (username)
+  auth_id?: string            // Supabase auth.users UUID (for user_vaults FK)
+  encrypted_blob: string      // AES-256-GCM encrypted mnemonic
+  nonce: string               // GCM nonce (hex)
+  vault_salt: string          // Salt for vault key derivation
+  auth_salt: string           // Salt for auth key derivation
+  blackbook_address: string   // L1 address
+  public_key: string          // Ed25519 public key (hex)
+  vault_version: number       // Encryption version (2 = Fork Architecture V2)
+  created_at?: string
+  updated_at?: string
+}
+
+/**
+ * Save wallet vault to Supabase
+ * The encrypted_blob can only be decrypted client-side with the user's vaultKey
+ * Saves to both profiles (for address/public_key) and user_vaults (for encryption data)
+ */
+export async function saveWalletVault(vault: Omit<WalletVault, 'created_at' | 'updated_at'>): Promise<boolean> {
+  try {
+    console.log('💾 saveWalletVault called with:', {
+      user_id: vault.user_id,
+      auth_id: vault.auth_id,
+      has_nonce: !!vault.nonce,
+      has_encrypted_blob: !!vault.encrypted_blob
+    })
+
+    // Update the profiles table with wallet address and public key
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        encrypted_blob: vault.encrypted_blob,
+        salt: vault.vault_salt,
+        blackbook_address: vault.blackbook_address,
+        public_key: vault.public_key,
+      })
+      .eq('user_id', vault.user_id)
+
+    if (profileError) {
+      console.error('❌ Error updating profiles:', profileError)
+      throw profileError
+    }
+    
+    console.log('✅ Profiles table updated successfully')
+    
+    // Save encryption data to user_vaults table
+    // user_vaults uses auth.users UUID as foreign key, not profile user_id
+    if (vault.auth_id) {
+      console.log('💾 Attempting to save to user_vaults with auth_id:', vault.auth_id)
+      
+      const { error: vaultError } = await supabase
+        .from('user_vaults')
+        .upsert({
+          user_id: vault.auth_id, // Use auth UUID for the FK
+          vault_salt: vault.vault_salt,
+          nonce: vault.nonce,
+          encrypted_blob: vault.encrypted_blob,
+          version: vault.vault_version || 2,
+          updated_at: new Date().toISOString()
+        })
+
+      if (vaultError) {
+        console.error('❌ Error saving to user_vaults:', vaultError)
+      } else {
+        console.log('✅ Saved to user_vaults for auth_id:', vault.auth_id)
+      }
+    } else {
+      console.warn('⚠️ No auth_id provided, skipping user_vaults save')
+    }
+
+    return true
+  } catch (error) {
+    console.error('❌ Error saving wallet vault:', error)
+    return false
+  }
+}
+
+/**
+ * Get wallet vault from Supabase
+ * Prioritizes user_vaults table (has nonce), falls back to profiles
+ * @param userId - profile user_id (username)
+ * @param authId - optional Supabase auth.users UUID for user_vaults lookup
+ */
+export async function getWalletVault(userId: string, authId?: string): Promise<WalletVault | null> {
+  try {
+    // Get profile data for address, public_key, and auth_id
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('user_id, auth_id, blackbook_address, public_key, encrypted_blob, salt')
+      .eq('user_id', userId)
+      .single()
+
+    // Use provided authId or get from profile
+    const vaultAuthId = authId || profile?.auth_id
+
+    // Try user_vaults table first (has proper encryption fields)
+    if (vaultAuthId) {
+      const { data: vault, error: vaultError } = await supabase
+        .from('user_vaults')
+        .select('user_id, vault_salt, nonce, encrypted_blob, version')
+        .eq('user_id', vaultAuthId)
+        .single()
+
+      if (vault && !vaultError) {
+        console.log('✅ Loaded vault from user_vaults')
+        return {
+          user_id: userId, // Return profile user_id
+          auth_id: vaultAuthId,
+          encrypted_blob: vault.encrypted_blob,
+          nonce: vault.nonce,
+          vault_salt: vault.vault_salt,
+          auth_salt: '',
+          blackbook_address: profile?.blackbook_address || '',
+          public_key: profile?.public_key || '',
+          vault_version: vault.version || 2
+        }
+      }
+    }
+
+    // Fallback: try to reconstruct from profiles table only
+    if (profile?.encrypted_blob) {
+      console.log('⚠️ Falling back to profiles table for vault')
+      // Parse combined blob format if present: "nonce:ciphertext"
+      let nonce = ''
+      let encryptedBlob = profile.encrypted_blob || ''
+      
+      if (encryptedBlob.includes(':')) {
+        const colonIndex = encryptedBlob.indexOf(':')
+        nonce = encryptedBlob.substring(0, colonIndex)
+        encryptedBlob = encryptedBlob.substring(colonIndex + 1)
+      }
+
+      return {
+        user_id: profile.user_id,
+        auth_id: profile.auth_id,
+        encrypted_blob: encryptedBlob,
+        nonce: nonce,
+        vault_salt: profile.salt || '',
+        auth_salt: '',
+        blackbook_address: profile.blackbook_address || '',
+        public_key: profile.public_key || '',
+        vault_version: 2
+      }
+    }
+
+    return null
+  } catch (error) {
+    console.error('Error fetching wallet vault:', error)
+    return null
+  }
+}
+
+/**
+ * Check if user has a wallet
+ */
+export async function hasWallet(userId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('blackbook_address, encrypted_blob')
+      .eq('user_id', userId)
+      .single()
+
+    if (error) return false
+    return !!(data?.blackbook_address && data?.encrypted_blob)
+  } catch (error) {
+    return false
+  }
+}
+
+/**
+ * Update wallet address in profile
+ */
+export async function updateWalletAddress(userId: string, blackbookAddress: string, publicKey: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ 
+        blackbook_address: blackbookAddress,
+        public_key: publicKey,
+        last_login: new Date().toISOString()
+      })
+      .eq('user_id', userId)
+
+    return !error
+  } catch (error) {
+    console.error('Error updating wallet address:', error)
+    return false
+  }
 }
 
 export function subscribeToMatchStats(matchId: string, callback: (stats: MatchStats) => void) {

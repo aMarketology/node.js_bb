@@ -4,14 +4,19 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Navigation from './components/Navigation'
 import Footer from './components/Footer'
-import { getFeaturedMatches, getUpcomingMatches, type Match } from '@/lib/fixtures'
+import { type Match } from '@/lib/fixtures'
 
 // Prism colors for cycling effects
 const prismColors = ['#00CED1', '#3B82F6', '#8B5CF6', '#EC4899', '#FF4757', '#FF6B35', '#FFD700']
 
+// L2 Markets API
+const L2_API = process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234'
+const APP_API = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+
 export default function Home() {
   const [activeColor, setActiveColor] = useState(0)
   const [featuredMatches, setFeaturedMatches] = useState<Match[]>([])
+  const [loading, setLoading] = useState(true)
 
   // Cycle through prism colors
   useEffect(() => {
@@ -21,10 +26,69 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [])
 
-  // Load real matches
+  // Load real markets from L2 blockchain
   useEffect(() => {
-    const matches = getUpcomingMatches(6)
-    setFeaturedMatches(matches)
+    async function loadMarkets() {
+      try {
+        setLoading(true)
+        
+        // Fetch directly from L2 blockchain server
+        console.log('🔗 Connecting to L2 blockchain at', L2_API)
+        const response = await fetch(`${L2_API}/markets`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (!response.ok) {
+          throw new Error(`L2 server returned ${response.status}`)
+        }
+        
+        const data = await response.json()
+        console.log('📦 Received data from L2:', data)
+        
+        if (data.markets && data.markets.length > 0) {
+          // Convert L2 market format to our Match type
+          const convertedMatches = data.markets.slice(0, 6).map((m: any) => ({
+            id: m.id,
+            date: new Date(m.kickoff).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
+            dateObj: new Date(m.kickoff),
+            homeTeam: m.homeTeam,
+            awayTeam: m.awayTeam,
+            group: m.group || m.stage,
+            venue: m.venue,
+            city: m.city,
+            country: m.country || '',
+            kickoffTime: new Date(m.kickoff).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+            homeFlag: m.homeTeamFlag,
+            awayFlag: m.awayTeamFlag,
+            status: m.status === 'upcoming' ? 'scheduled' : m.status,
+            // Convert L2 odds format (0.0-1.0 probabilities) to traditional odds
+            homeOdds: parseFloat(m.homeWinOdds) > 0 ? Number((1 / parseFloat(m.homeWinOdds)).toFixed(2)) : 2.0,
+            drawOdds: parseFloat(m.drawOdds) > 0 ? Number((1 / parseFloat(m.drawOdds)).toFixed(2)) : 3.0,
+            awayOdds: parseFloat(m.awayWinOdds) > 0 ? Number((1 / parseFloat(m.awayWinOdds)).toFixed(2)) : 2.5,
+            // Use real volume and liquidity from L2
+            totalBets: parseInt(m.volume) > 0 ? Math.floor(parseInt(m.volume) / 10) : 0,
+            homePool: parseInt(m.liquidity) * parseFloat(m.homeWinOdds),
+            drawPool: parseInt(m.liquidity) * parseFloat(m.drawOdds),
+            awayPool: parseInt(m.liquidity) * parseFloat(m.awayWinOdds)
+          }))
+          
+          setFeaturedMatches(convertedMatches)
+          console.log('✅ Loaded', convertedMatches.length, 'real markets from L2 blockchain')
+        } else {
+          throw new Error('No markets returned from L2 blockchain')
+        }
+      } catch (error) {
+        console.error('❌ Failed to connect to L2 blockchain:', error)
+        setFeaturedMatches([]) // Show error state, no fallback
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadMarkets()
   }, [])
 
   return (
@@ -189,13 +253,32 @@ export default function Home() {
 
           {/* Matches Grid */}
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {featuredMatches.length > 0 ? (
+            {loading ? (
+              <div className="col-span-3 text-center py-12">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-prism-teal mb-4"></div>
+                <p className="text-gray-400">Connecting to L2 blockchain...</p>
+                <p className="text-xs text-gray-500 mt-2">Loading real markets from localhost:1234</p>
+              </div>
+            ) : featuredMatches.length > 0 ? (
               featuredMatches.map((match, index) => (
                 <MatchCard key={match.id} match={match} index={index} />
               ))
             ) : (
               <div className="col-span-3 text-center py-12">
-                <p className="text-gray-400">Loading matches...</p>
+                <div className="mb-4">
+                  <svg className="w-16 h-16 mx-auto text-prism-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <p className="text-prism-red font-bold text-lg mb-2">Not Connecting</p>
+                <p className="text-gray-400 text-sm mb-4">Unable to connect to L2 blockchain server</p>
+                <p className="text-xs text-gray-500 mb-4">Make sure L2 server is running on localhost:1234</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-6 py-3 rounded-xl font-semibold text-white prism-gradient-bg hover:opacity-90 transition-opacity"
+                >
+                  Retry Connection
+                </button>
               </div>
             )}
           </div>

@@ -6,12 +6,14 @@ import { motion } from 'framer-motion'
 import { useAuth } from '@/app/contexts/AuthContext'
 import { formatAddress } from '@/lib/blockchain'
 import AuthModal from './AuthModal'
+import FractalCursor from './FractalCursor'
 
 export default function Navigation() {
-  const { user, walletAddress, isAuthenticated, isKYCVerified, signOut } = useAuth()
+  const { user, walletAddress, isAuthenticated, isKYCVerified, signOut, activeWallet, switchWallet } = useAuth()
   const [scrolled, setScrolled] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [fractalEnabled, setFractalEnabled] = useState(true)
 
   useEffect(() => {
     const handleScroll = () => {
@@ -23,6 +25,8 @@ export default function Navigation() {
 
   return (
     <>
+      <FractalCursor enabled={fractalEnabled} />
+      
       <motion.nav
         initial={{ y: -100 }}
         animate={{ y: 0 }}
@@ -58,11 +62,35 @@ export default function Navigation() {
               </motion.div>
             </Link>
 
+            {/* Fractal Toggle */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setFractalEnabled(!fractalEnabled)}
+              className="ml-4 p-2 rounded-lg bg-dark-200 border border-dark-border hover:border-prism-teal transition-colors relative group"
+              title={fractalEnabled ? 'Disable Fractal Cursor' : 'Enable Fractal Cursor'}
+            >
+              <div className={`w-5 h-5 transition-all duration-300 ${fractalEnabled ? 'prism-gradient-bg' : 'bg-gray-600'} rounded`}>
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
+                </svg>
+              </div>
+              {/* Tooltip */}
+              <div className="absolute left-0 top-full mt-2 px-3 py-1 bg-dark-200 border border-dark-border rounded text-xs text-gray-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                {fractalEnabled ? 'Disable' : 'Enable'} Fractal Effect
+              </div>
+            </motion.button>
+
             {/* Desktop Menu */}
             <div className="hidden md:flex items-center gap-8">
-              <NavLink href="#matches">Matches</NavLink>
-              <NavLink href="#markets">Markets</NavLink>
-              <NavLink href="#leaderboard">Leaderboard</NavLink>
+              <NavLink href="/#matches">Matches</NavLink>
+              <NavLink href="/markets">Markets</NavLink>
+              <NavLink href="/drafts">Drafts</NavLink>
+              {isAuthenticated && (activeWallet === 'alice' || activeWallet === 'bob') && (
+                <NavLink href="/oracle">Oracle</NavLink>
+              )}
+              <NavLink href="/#leaderboard">Leaderboard</NavLink>
+              {isAuthenticated && <NavLink href="/wallet">Wallet</NavLink>}
               
               {/* Auth Section */}
               {isAuthenticated ? (
@@ -80,11 +108,13 @@ export default function Navigation() {
                     {/* User Info */}
                     <div className="text-left">
                       <div className="text-sm font-semibold text-white">
-                        {user?.username || 'User'}
+                        {activeWallet === 'alice' ? '🟣 Alice' : 
+                         activeWallet === 'bob' ? '🔵 Bob' :
+                         user?.user_id || user?.email || 'User'}
                       </div>
-                      {walletAddress && (
+                      {(walletAddress || user?.blackbook_address) && (
                         <div className="text-xs text-gray-400">
-                          {formatAddress(walletAddress)}
+                          {formatAddress(walletAddress || user?.blackbook_address || '')}
                         </div>
                       )}
                     </div>
@@ -118,10 +148,63 @@ export default function Navigation() {
                         </div>
                       </div>
 
+                      {/* Wallet Switcher */}
+                      <div className="p-2 border-b border-dark-border">
+                        <div className="text-xs font-medium text-gray-500 px-4 py-2">Switch Wallet</div>
+                        <button
+                          onClick={() => {
+                            switchWallet('user')
+                            setShowUserMenu(false)
+                          }}
+                          className={`w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-lg transition-colors ${
+                            activeWallet === 'user'
+                              ? 'bg-prism-teal/20 text-prism-teal'
+                              : 'text-gray-300 hover:bg-dark-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span>👤</span>
+                            <span>Your Wallet</span>
+                          </div>
+                          {activeWallet === 'user' && <span className="text-prism-teal">✓</span>}
+                        </button>
+                        <button
+                          onClick={() => {
+                            switchWallet('alice')
+                            setShowUserMenu(false)
+                          }}
+                          className={`w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-lg transition-colors ${
+                            activeWallet === 'alice'
+                              ? 'bg-prism-purple/20 text-prism-purple'
+                              : 'text-gray-300 hover:bg-dark-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span>🟣</span>
+                            <span>Alice</span>
+                          </div>
+                          {activeWallet === 'alice' && <span className="text-prism-purple">✓</span>}
+                        </button>
+                        <button
+                          onClick={() => {
+                            switchWallet('bob')
+                            setShowUserMenu(false)
+                          }}
+                          className={`w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-lg transition-colors ${
+                            activeWallet === 'bob'
+                              ? 'bg-prism-teal/20 text-prism-teal'
+                              : 'text-gray-300 hover:bg-dark-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span>🔵</span>
+                            <span>Bob</span>
+                          </div>
+                          {activeWallet === 'bob' && <span className="text-prism-teal">✓</span>}
+                        </button>
+                      </div>
+
                       <div className="p-2">
-                        <MenuButton href="/dashboard" icon="📊">Dashboard</MenuButton>
-                        <MenuButton href="/bets" icon="🎯">My Bets</MenuButton>
-                        <MenuButton href="/wallet" icon="💰">Wallet</MenuButton>
                         <MenuButton href="/settings" icon="⚙️">Settings</MenuButton>
                         <button
                           onClick={() => {
