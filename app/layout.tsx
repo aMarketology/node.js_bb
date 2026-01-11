@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { AuthProvider } from './contexts/AuthContext'
 import { Layer2Provider } from './contexts/Layer2Context'
+import { ClientLayout } from './ClientLayout'
 
 export const metadata: Metadata = {
   title: 'Prism World Cup 2026 | Prediction Market',
@@ -17,11 +18,15 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <AuthProvider>
-          <Layer2Provider>
-            {children}
-          </Layer2Provider>
-        </AuthProvider>
+        <ClientLayout>
+          <div id="grayscale-wrapper">
+            <AuthProvider>
+              <Layer2Provider>
+                {children}
+              </Layer2Provider>
+            </AuthProvider>
+          </div>
+        </ClientLayout>
       </body>
     </html>
   )

@@ -135,7 +135,7 @@ export default function FractalCursor({ enabled = true }: FractalCursorProps) {
       {particles.map((particle) => (
         <div
           key={particle.id}
-          className="fractal-particle"
+          className="fractal-particle no-grayscale"
           style={{
             left: `${particle.x}px`,
             top: `${particle.y}px`,
@@ -149,7 +149,7 @@ export default function FractalCursor({ enabled = true }: FractalCursorProps) {
       {/* Custom cursor glow */}
       {isMoving && (
         <div
-          className="fixed pointer-events-none z-[9997] transition-all duration-100 ease-out"
+          className="fixed pointer-events-none z-[9997] transition-all duration-100 ease-out no-grayscale"
           style={{
             left: `${mousePos.x}px`,
             top: `${mousePos.y}px`,

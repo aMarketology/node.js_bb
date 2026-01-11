@@ -259,3 +259,15 @@ html {
     opacity: 0;
   }
 }
+
+/* === GRAYSCALE EXCLUSION FOR FRACTAL === */
+/* Fractal particles are rendered at body level, outside #grayscale-wrapper */
+/* So they won't be affected by the grayscale filter */
+.fractal-particle,
+.no-grayscale {
+  filter: none !important;
+}
+
+#grayscale-wrapper {
+  transition: filter 0.3s ease;
+}
