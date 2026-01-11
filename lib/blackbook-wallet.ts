@@ -546,7 +546,7 @@ export async function createCanonicalPayloadHash(
 }
 
 /**
- * Sign a transfer transaction
+ * Sign a transfer transaction using V1 format
  */
 export async function signTransfer(
   secretKey: Uint8Array,
@@ -556,48 +556,57 @@ export async function signTransfer(
   amount: number
 ): Promise<{
   public_key: string;
-  payload_hash: string;
-  payload_fields: Record<string, unknown>;
-  operation_type: string;
-  schema_version: number;
+  wallet_address: string;
+  payload: string;
   timestamp: number;
   nonce: string;
   chain_id: number;
-  request_path: string;
+  schema_version: number;
   signature: string;
 }> {
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = generateNonce();
   
-  const fullPayload = { from, to, amount, timestamp, nonce };
-  const payloadHash = await createCanonicalPayloadHash('transfer', fullPayload);
+  // V1 Format: Raw JSON payload (NOT hashed)
+  const payload = { to, amount };
+  const payloadJson = JSON.stringify(payload);
   
-  const domainPrefix = `BLACKBOOK_L${CHAIN_ID_L1}_/transfer`;
-  const message = `${domainPrefix}\n${payloadHash}\n${timestamp}\n${nonce}`;
+  // Message: {payload}\n{timestamp}\n{nonce}
+  const message = `${payloadJson}\n${timestamp}\n${nonce}`;
   
-  console.log('🔐 Signature Debug:');
-  console.log('  Domain Prefix:', domainPrefix);
-  console.log('  Payload Hash:', payloadHash);
-  console.log('  Full Message:', message);
+  console.log('🔐 V1 Signature Debug:');
+  console.log('  From:', from);
+  console.log('  To:', to);
+  console.log('  Amount:', amount);
+  console.log('  Payload JSON:', payloadJson);
+  console.log('  Message:', message);
   console.log('  PublicKey (hex):', bytesToHex(publicKey));
   console.log('  SecretKey length:', secretKey.length);
   
+  // Prepend chain_id byte (0x01 for L1)
+  const chainIdByte = new Uint8Array([CHAIN_ID_L1]);
   const messageBytes = new TextEncoder().encode(message);
-  const signature = signMessage(messageBytes, secretKey);
+  const fullMessage = new Uint8Array(chainIdByte.length + messageBytes.length);
+  fullMessage.set(chainIdByte);
+  fullMessage.set(messageBytes, chainIdByte.length);
+  
+  console.log('  Full Message (with chain_id):', bytesToHex(fullMessage));
+  
+  // Sign with Ed25519
+  const signature = signMessage(fullMessage, secretKey);
   
   const signedRequest = {
     public_key: bytesToHex(publicKey),
-    payload_hash: payloadHash,
-    payload_fields: fullPayload,
-    operation_type: 'transfer',
-    schema_version: 2,
+    wallet_address: from,
+    payload: payloadJson,  // Raw JSON string
     timestamp,
     nonce,
     chain_id: CHAIN_ID_L1,
-    request_path: '/transfer',
+    schema_version: 1,  // V1 format
     signature: bytesToHex(signature)
   };
   
+  console.log('  Public Key (hex):', signedRequest.public_key);
   console.log('  Signature (hex):', signedRequest.signature);
   console.log('  Full Request:', JSON.stringify(signedRequest, null, 2));
   
@@ -728,24 +737,53 @@ export async function sendTransfer(
 ): Promise<{ success: boolean; tx_id?: string; error?: string }> {
   console.log('📤 Sending transfer:', { from: wallet.address, to, amount });
   
+  // Handle both secretKey (from unlocked wallet) and privateKey (from test accounts)
+  let privateKey = (wallet as any).privateKey || wallet.secretKey;
+  let publicKey = wallet.publicKey;
+  
+  // Convert hex strings to Uint8Array if needed
+  if (typeof privateKey === 'string') {
+    privateKey = hexToBytes(privateKey);
+  }
+  if (typeof publicKey === 'string') {
+    publicKey = hexToBytes(publicKey);
+  }
+  
+  // Ed25519 requires 64-byte secret key (32-byte seed + 32-byte public key)
+  // If we only have the 32-byte seed, derive the proper keypair using nacl
+  if (privateKey.length === 32) {
+    const keyPair = nacl.sign.keyPair.fromSeed(privateKey);
+    privateKey = keyPair.secretKey;
+    // Verify the public key matches
+    if (bytesToHex(keyPair.publicKey) !== bytesToHex(publicKey)) {
+      console.warn('⚠️ Public key mismatch! Using derived public key from seed.');
+      publicKey = keyPair.publicKey;
+    }
+  }
+  
   const signedRequest = await signTransfer(
-    wallet.secretKey,
-    wallet.publicKey,
+    privateKey,
+    publicKey,
     wallet.address,
     to,
     amount
   );
   
-  console.log('📡 Posting to:', `${l1ApiUrl}/transfer`);
+  console.log('📡 Posting transfer via API proxy');
   
-  const response = await fetch(`${l1ApiUrl}/transfer`, {
+  // Use Next.js API proxy to avoid CORS issues
+  const response = await fetch('/api/l1-proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(signedRequest)
+    body: JSON.stringify({
+      endpoint: '/transfer',
+      method: 'POST',
+      data: signedRequest
+    })
   });
   
   const result = await response.json();
-  console.log('📥 Server response:', result);
+  console.log('📥 Transfer response:', result);
   
   return result;
 }
@@ -754,7 +792,9 @@ export async function sendTransfer(
  * Get balance for an address
  */
 export async function getBalance(l1ApiUrl: string, address: string): Promise<{ balance: number; pending?: number }> {
-  const response = await fetch(`${l1ApiUrl}/balance/${address}`);
+  // Use Next.js API proxy to avoid CORS issues
+  const endpoint = `/balance/${address}`;
+  const response = await fetch(`/api/l1-proxy?endpoint=${encodeURIComponent(endpoint)}`);
   return await response.json();
 }
 
@@ -767,7 +807,9 @@ export async function getTransactionHistory(
   limit: number = 20
 ): Promise<{ success: boolean; transactions: any[] }> {
   try {
-    const response = await fetch(`${l1ApiUrl}/explorer/account/${address}/history?limit=${limit}`);
+    // Use Next.js API proxy to avoid CORS issues - encode the full endpoint with query params
+    const endpoint = `/explorer/account/${address}/history?limit=${limit}`;
+    const response = await fetch(`/api/l1-proxy?endpoint=${encodeURIComponent(endpoint)}`);
     return await response.json();
   } catch (error) {
     return { success: false, transactions: [] };

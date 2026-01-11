@@ -114,34 +114,61 @@ export default function WalletPage() {
     }
   }, [authLoading, isAuthenticated, router])
 
-  // Update wallet when activeWallet or walletAddress changes (for Alice/Bob switching)
+  // Update wallet when activeWallet changes (for Alice/Bob switching)
   useEffect(() => {
-    if (walletAddress && (activeWallet === 'alice' || activeWallet === 'bob')) {
-      // For test accounts, immediately load their balance
-      // Test accounts are always "unlocked" since we have their private keys
+    // Import addresses directly from test accounts to ensure correct values
+    const ALICE_ADDRESS = 'L1_52882D768C0F3E7932AAD1813CF8B19058D507A8'
+    const BOB_ADDRESS = 'L1_5DB4B525FB40D6EA6BFD24094C2BC24984BAC433'
+    
+    if (activeWallet === 'alice') {
+      // For Alice test account
+      const aliceAddress = ALICE_ADDRESS
+      console.log('🟣 Switching to Alice wallet:', aliceAddress)
       setWallet(prev => ({
         ...prev,
-        address: walletAddress,
+        address: aliceAddress,
         isLoading: true,
-        hasVault: true // Test accounts always have wallets
+        hasVault: true
       }))
-      // Create a pseudo-unlocked wallet for test accounts using their keys
-      const testAccountData = activeWallet === 'alice' 
-        ? { address: walletAddress, privateKey: '18f2c2e3bcb7a4b5329cfed4bd79bf17df4d47aa1888a6b3d1a1450fb53a8a24', publicKey: 'c0e349153cbc75e9529b5f1963205cab783463c6835c826a7587e0e0903c6705' }
-        : { address: walletAddress, privateKey: 'e4ac49e5a04ef7dfc6e1a838fdf14597f2d514d0029a82cb45c916293487c25b', publicKey: '582420216093fcff65b0eec2ca2c8227dfc2b6b7428110f36c3fc1349c4b2f5a' }
-      setUnlockedWallet(testAccountData as any)
-      loadWalletData(walletAddress)
-    } else if (activeWallet === 'user' && user?.blackbook_address) {
-      // Switch back to user's wallet
+      setUnlockedWallet({
+        address: aliceAddress,
+        privateKey: 'c0e349153cbc75e9529b5f1963205cab783463c6835c826a7587e0e0903c6705',
+        publicKey: '18f2c2e3bcb7a4b5329cfed4bd79bf17df4d47aa1888a6b3d1a1450fb53a8a24',
+        mnemonic: 'machine sword cause scrub simple damage program together spoon lock ball banana'
+      } as any)
+      loadWalletData(aliceAddress)
+    } else if (activeWallet === 'bob') {
+      // For Bob test account
+      const bobAddress = BOB_ADDRESS
+      console.log('🔵 Switching to Bob wallet:', bobAddress)
       setWallet(prev => ({
         ...prev,
-        address: user.blackbook_address!,
-        isLoading: true
+        address: bobAddress,
+        isLoading: true,
+        hasVault: true
       }))
-      setUnlockedWallet(null) // User wallet needs to be unlocked separately
-      loadWalletData(user.blackbook_address)
+      setUnlockedWallet({
+        address: bobAddress,
+        privateKey: '582420216093fcff65b0eec2ca2c8227dfc2b6b7428110f36c3fc1349c4b2f5a',
+        publicKey: 'e4ac49e5a04ef7dfc6e1a838fdf14597f2d514d0029a82cb45c916293487c25b',
+        mnemonic: 'base echo grape penalty hawk resemble obscure unusual throw paddle carpet elder'
+      } as any)
+      loadWalletData(bobAddress)
+    } else if (activeWallet === 'user') {
+      // Switch back to user's wallet
+      const userAddress = user?.blackbook_address
+      console.log('👤 Switching to user wallet:', userAddress)
+      if (userAddress) {
+        setWallet(prev => ({
+          ...prev,
+          address: userAddress,
+          isLoading: true
+        }))
+        setUnlockedWallet(null) // User wallet needs to be unlocked separately
+        loadWalletData(userAddress)
+      }
     }
-  }, [activeWallet, walletAddress])
+  }, [activeWallet]) // Only depend on activeWallet, not walletAddress
 
   // Auto-unlock wallet using stored session key
   const attemptAutoUnlock = useCallback(async (userId: string, blackbookAddress: string) => {
@@ -184,9 +211,14 @@ export default function WalletPage() {
     return false
   }, [])
 
-  // Check for existing wallet and load data
+  // Check for existing wallet and load data (only for user's own wallet)
   useEffect(() => {
     async function initWallet() {
+      // Skip if using test accounts - they're handled by the wallet switching effect
+      if (activeWallet === 'alice' || activeWallet === 'bob') {
+        return
+      }
+      
       if (!user?.user_id) {
         setWallet(prev => ({ ...prev, isLoading: false }))
         return
@@ -258,14 +290,17 @@ export default function WalletPage() {
     }
 
     initWallet()
-  }, [user, attemptAutoUnlock, unlockedWallet])
+  }, [user, attemptAutoUnlock, unlockedWallet, activeWallet])
 
   async function loadWalletData(address: string) {
     try {
+      console.log('📡 Loading wallet data for:', address)
       setWallet(prev => ({ ...prev, isLoading: true, error: null }))
       
       // Fetch balance from L1
+      console.log(`📡 Fetching L1 balance from: ${L1_API_URL}/balance/${address}`)
       const balanceData = await getBalance(L1_API_URL, address)
+      console.log('💰 L1 Balance response:', balanceData)
       
       // Fetch transaction history
       let transactions: Transaction[] = []
@@ -287,8 +322,9 @@ export default function WalletPage() {
         isLoading: false,
         error: null
       }))
+      console.log('✅ Wallet data loaded:', { address, balance: balanceData.balance })
     } catch (error) {
-      console.error('Failed to load wallet:', error)
+      console.error('❌ Failed to load wallet:', error)
       setWallet(prev => ({
         ...prev,
         address,
