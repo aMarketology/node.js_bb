@@ -45,11 +45,15 @@ export async function authenticateL2(wallet: UnlockedWallet): Promise<string> {
   }
   
   const data = await response.json()
+  if (!data.session_token) {
+    throw new Error('L2 authentication response missing session_token')
+  }
+  
   sessionToken = data.session_token
   tokenExpiry = Date.now() + (2.5 * 60 * 1000) // 2.5 minutes
   
   console.log('✅ L2 session established')
-  return sessionToken
+  return data.session_token
 }
 
 /**

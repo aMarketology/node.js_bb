@@ -459,20 +459,20 @@ function Step1PersonalInfo({ formData, updateFormData }: any) {
         <FormInput
           label="First Name *"
           value={formData.firstName}
-          onChange={(v) => updateFormData('firstName', v)}
+          onChange={(v: string) => updateFormData('firstName', v)}
           placeholder="John"
           required
         />
         <FormInput
           label="Middle Name"
           value={formData.middleName}
-          onChange={(v) => updateFormData('middleName', v)}
+          onChange={(v: string) => updateFormData('middleName', v)}
           placeholder="Michael"
         />
         <FormInput
           label="Last Name *"
           value={formData.lastName}
-          onChange={(v) => updateFormData('lastName', v)}
+          onChange={(v: string) => updateFormData('lastName', v)}
           placeholder="Smith"
           required
         />
@@ -483,13 +483,13 @@ function Step1PersonalInfo({ formData, updateFormData }: any) {
           label="Date of Birth *"
           type="date"
           value={formData.dateOfBirth}
-          onChange={(v) => updateFormData('dateOfBirth', v)}
+          onChange={(v: any) => updateFormData('dateOfBirth', v)}
           required
         />
         <FormInput
           label="Social Security Number *"
           value={formData.ssn}
-          onChange={(v) => updateFormData('ssn', v.replace(/\D/g, ''))}
+          onChange={(v: any) => updateFormData('ssn', v.replace(/\D/g, ''))}
           placeholder="123-45-6789"
           maxLength={9}
           required
@@ -516,7 +516,7 @@ function Step2ContactInfo({ formData, updateFormData }: any) {
         label="Email Address *"
         type="email"
         value={formData.email}
-        onChange={(v) => updateFormData('email', v)}
+        onChange={(v: any) => updateFormData('email', v)}
         placeholder="john.smith@example.com"
         required
       />
@@ -525,7 +525,7 @@ function Step2ContactInfo({ formData, updateFormData }: any) {
         label="Phone Number *"
         type="tel"
         value={formData.phone}
-        onChange={(v) => updateFormData('phone', v)}
+        onChange={(v: any) => updateFormData('phone', v)}
         placeholder="+1 (555) 123-4567"
         required
       />
@@ -548,7 +548,7 @@ function Step3Address({ formData, updateFormData }: any) {
       <FormInput
         label="Street Address *"
         value={formData.streetAddress}
-        onChange={(v) => updateFormData('streetAddress', v)}
+        onChange={(v: any) => updateFormData('streetAddress', v)}
         placeholder="123 Main Street"
         required
         disabled={formData.bypassKYC}
@@ -557,7 +557,7 @@ function Step3Address({ formData, updateFormData }: any) {
       <FormInput
         label="Apartment/Unit #"
         value={formData.apartmentUnit}
-        onChange={(v) => updateFormData('apartmentUnit', v)}
+        onChange={(v: any) => updateFormData('apartmentUnit', v)}
         placeholder="Apt 4B"
         disabled={formData.bypassKYC}
       />
@@ -566,7 +566,7 @@ function Step3Address({ formData, updateFormData }: any) {
         <FormInput
           label="City *"
           value={formData.city}
-          onChange={(v) => updateFormData('city', v)}
+          onChange={(v: any) => updateFormData('city', v)}
           placeholder="New York"
           required
           disabled={formData.bypassKYC}
@@ -574,7 +574,7 @@ function Step3Address({ formData, updateFormData }: any) {
         <FormInput
           label="State *"
           value={formData.state}
-          onChange={(v) => updateFormData('state', v)}
+          onChange={(v: any) => updateFormData('state', v)}
           placeholder="NY"
           required
           disabled={formData.bypassKYC}
@@ -582,7 +582,7 @@ function Step3Address({ formData, updateFormData }: any) {
         <FormInput
           label="ZIP Code *"
           value={formData.zipCode}
-          onChange={(v) => updateFormData('zipCode', v)}
+          onChange={(v: any) => updateFormData('zipCode', v)}
           placeholder="10001"
           maxLength={5}
           required
@@ -593,7 +593,7 @@ function Step3Address({ formData, updateFormData }: any) {
       <FormInput
         label="Country *"
         value={formData.country}
-        onChange={(v) => updateFormData('country', v)}
+        onChange={(v: any) => updateFormData('country', v)}
         disabled
         required
       />
@@ -627,7 +627,7 @@ function Step4IDVerification({ formData, updateFormData, idFrontFile, setIdFront
         <FormInput
           label="ID Number *"
           value={formData.idNumber}
-          onChange={(v) => updateFormData('idNumber', v)}
+          onChange={(v: any) => updateFormData('idNumber', v)}
           placeholder="DL123456789"
           required
           disabled={formData.bypassKYC}
@@ -636,7 +636,7 @@ function Step4IDVerification({ formData, updateFormData, idFrontFile, setIdFront
           label="Expiration Date *"
           type="date"
           value={formData.idExpirationDate}
-          onChange={(v) => updateFormData('idExpirationDate', v)}
+          onChange={(v: any) => updateFormData('idExpirationDate', v)}
           required
           disabled={formData.bypassKYC}
         />
@@ -758,7 +758,7 @@ function Step5FinancialInfo({ formData, updateFormData }: any) {
         <FormInput
           label="Employer/Business Name"
           value={formData.employer}
-          onChange={(v) => updateFormData('employer', v)}
+          onChange={(v: any) => updateFormData('employer', v)}
           placeholder="Company Name"
           disabled={formData.bypassKYC}
         />
@@ -779,7 +779,7 @@ function Step6AccountSecurity({ formData, updateFormData }: any) {
         label="Password *"
         type="password"
         value={formData.password}
-        onChange={(v) => updateFormData('password', v)}
+        onChange={(v: any) => updateFormData('password', v)}
         placeholder="••••••••"
         required
       />
@@ -788,7 +788,7 @@ function Step6AccountSecurity({ formData, updateFormData }: any) {
         label="Confirm Password *"
         type="password"
         value={formData.confirmPassword}
-        onChange={(v) => updateFormData('confirmPassword', v)}
+        onChange={(v: any) => updateFormData('confirmPassword', v)}
         placeholder="••••••••"
         required
       />
@@ -825,14 +825,14 @@ function Step7Compliance({ formData, updateFormData }: any) {
       <div className="space-y-4">
         <CheckboxField
           checked={formData.isUSCitizen}
-          onChange={(v) => updateFormData('isUSCitizen', v)}
+          onChange={(v: any) => updateFormData('isUSCitizen', v)}
           label="I am a U.S. Citizen or Permanent Resident *"
           disabled={formData.bypassKYC}
         />
 
         <CheckboxField
           checked={formData.isPoliticallyExposed}
-          onChange={(v) => updateFormData('isPoliticallyExposed', v)}
+          onChange={(v: any) => updateFormData('isPoliticallyExposed', v)}
           label="I am a Politically Exposed Person (PEP)"
           helpText="Senior government official or immediate family member"
           disabled={formData.bypassKYC}
@@ -840,7 +840,7 @@ function Step7Compliance({ formData, updateFormData }: any) {
 
         <CheckboxField
           checked={formData.agreeToTerms}
-          onChange={(v) => updateFormData('agreeToTerms', v)}
+          onChange={(v: any) => updateFormData('agreeToTerms', v)}
           label={
             <span>
               I agree to the <a href="#" className="text-prism-teal hover:underline">Terms of Service</a> *
@@ -850,7 +850,7 @@ function Step7Compliance({ formData, updateFormData }: any) {
 
         <CheckboxField
           checked={formData.agreeToPrivacyPolicy}
-          onChange={(v) => updateFormData('agreeToPrivacyPolicy', v)}
+          onChange={(v: any) => updateFormData('agreeToPrivacyPolicy', v)}
           label={
             <span>
               I agree to the <a href="#" className="text-prism-teal hover:underline">Privacy Policy</a> *
@@ -860,7 +860,7 @@ function Step7Compliance({ formData, updateFormData }: any) {
 
         <CheckboxField
           checked={formData.certifyTruthful}
-          onChange={(v) => updateFormData('certifyTruthful', v)}
+          onChange={(v: any) => updateFormData('certifyTruthful', v)}
           label="I certify that all information provided is true and accurate *"
         />
       </div>

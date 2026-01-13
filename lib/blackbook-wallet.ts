@@ -7,6 +7,8 @@
  *   └─ vaultKey = PBKDF2(VAULT_DOMAIN + password + vault_salt) → NEVER sent
  */
 
+import * as nacl from 'tweetnacl';
+
 // Domain separation for Fork Architecture
 const AUTH_FORK_DOMAIN = "BLACKBOOK_AUTH_V2";
 const VAULT_FORK_DOMAIN = "BLACKBOOK_VAULT_V2";

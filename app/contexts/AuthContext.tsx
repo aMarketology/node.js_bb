@@ -42,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeWallet, setActiveWallet] = useState<ActiveWallet>('user')
+  const [activeWallet, setActiveWallet] = useState<ActiveWallet>('alice') // Default to Alice for testing
 
   // Initialize auth state
   useEffect(() => {

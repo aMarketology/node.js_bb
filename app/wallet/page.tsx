@@ -3,7 +3,7 @@
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '@/app/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
@@ -76,6 +76,9 @@ export default function WalletPage() {
   // Unlocked wallet (in memory only)
   const [unlockedWallet, setUnlockedWallet] = useState<UnlockedWallet | null>(null)
   
+  // Track if we're currently loading to prevent duplicate calls
+  const loadingRef = useRef(false)
+  
   // Modal states
   const [activeModal, setActiveModal] = useState<ModalType>('none')
   const [activeTab, setActiveTab] = useState<'overview' | 'send' | 'receive' | 'history'>('overview')
@@ -107,7 +110,7 @@ export default function WalletPage() {
   const [showMigrationPrompt, setShowMigrationPrompt] = useState(false)
   const [resettingWallet, setResettingWallet] = useState(false)
 
-  // Redirect if not authenticated
+  // Redirect if not authenticated - only redirect once auth loading is complete
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
       router.push('/')
@@ -116,6 +119,9 @@ export default function WalletPage() {
 
   // Update wallet when activeWallet changes (for Alice/Bob switching)
   useEffect(() => {
+    // Prevent duplicate loading
+    if (loadingRef.current) return
+    
     // Import addresses directly from test accounts to ensure correct values
     const ALICE_ADDRESS = 'L1_52882D768C0F3E7932AAD1813CF8B19058D507A8'
     const BOB_ADDRESS = 'L1_5DB4B525FB40D6EA6BFD24094C2BC24984BAC433'
@@ -124,12 +130,15 @@ export default function WalletPage() {
       // For Alice test account
       const aliceAddress = ALICE_ADDRESS
       console.log('🟣 Switching to Alice wallet:', aliceAddress)
-      setWallet(prev => ({
-        ...prev,
+      setWallet({
         address: aliceAddress,
+        balance: 0,
+        pendingBalance: 0,
+        transactions: [],
         isLoading: true,
+        error: null,
         hasVault: true
-      }))
+      })
       setUnlockedWallet({
         address: aliceAddress,
         privateKey: 'c0e349153cbc75e9529b5f1963205cab783463c6835c826a7587e0e0903c6705',
@@ -141,12 +150,15 @@ export default function WalletPage() {
       // For Bob test account
       const bobAddress = BOB_ADDRESS
       console.log('🔵 Switching to Bob wallet:', bobAddress)
-      setWallet(prev => ({
-        ...prev,
+      setWallet({
         address: bobAddress,
+        balance: 0,
+        pendingBalance: 0,
+        transactions: [],
         isLoading: true,
+        error: null,
         hasVault: true
-      }))
+      })
       setUnlockedWallet({
         address: bobAddress,
         privateKey: '582420216093fcff65b0eec2ca2c8227dfc2b6b7428110f36c3fc1349c4b2f5a',
@@ -290,10 +302,37 @@ export default function WalletPage() {
     }
 
     initWallet()
-  }, [user, attemptAutoUnlock, unlockedWallet, activeWallet])
+  }, [user?.user_id, user?.blackbook_address, activeWallet]) // Only re-run when these specific values change
+
+  // Show loading screen while auth is initializing to prevent flash
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-dark">
+        <Navigation />
+        <div className="pt-32 flex items-center justify-center min-h-[80vh]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-prism-teal mx-auto mb-4"></div>
+            <p className="text-gray-400">Loading wallet...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  
+  // Don't render anything if not authenticated (prevents flash before redirect)
+  if (!isAuthenticated) {
+    return null
+  }
 
   async function loadWalletData(address: string) {
+    // Prevent duplicate concurrent calls
+    if (loadingRef.current) {
+      console.log('⏩ Skipping duplicate load for:', address)
+      return
+    }
+    
     try {
+      loadingRef.current = true
       console.log('📡 Loading wallet data for:', address)
       setWallet(prev => ({ ...prev, isLoading: true, error: null }))
       
@@ -331,6 +370,8 @@ export default function WalletPage() {
         isLoading: false,
         error: 'Failed to connect to BlackBook L1. Server may be offline.'
       }))
+    } finally {
+      loadingRef.current = false
     }
   }
 

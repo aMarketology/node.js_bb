@@ -4,20 +4,10 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Navigation from '@/app/components/Navigation'
 import Footer from '@/app/components/Footer'
-import { useLayer2 } from '@/app/contexts/Layer2Context'
 import { useAuth } from '@/app/contexts/AuthContext'
 
 export default function OraclePage() {
-  const { 
-    resolveMarket, 
-    signResolution, 
-    proposeResolution, 
-    disputeResolution, 
-    voteOnDispute,
-    getOracleStats,
-    listOracles,
-    isConnected 
-  } = useLayer2()
+  // TODO: Implement oracle functionality through Markets SDK
   const { isAuthenticated, activeWallet } = useAuth()
   
   const [pendingMarkets, setPendingMarkets] = useState<any[]>([])
@@ -29,10 +19,10 @@ export default function OraclePage() {
   const isOracle = activeWallet === 'alice' || activeWallet === 'bob'
 
   useEffect(() => {
-    if (isAuthenticated && isConnected && isOracle) {
+    if (isAuthenticated && isOracle) {
       loadOracleData()
     }
-  }, [isAuthenticated, isConnected, isOracle])
+  }, [isAuthenticated, isOracle])
 
   async function loadOracleData() {
     try {
@@ -52,9 +42,8 @@ export default function OraclePage() {
         setDisputes(data.disputes || [])
       }
 
-      // Get oracle stats for this account
-      const stats = await getOracleStats()
-      setOracleStats(stats)
+      // TODO: Get oracle stats via Markets SDK
+      setOracleStats({ totalResolutions: 0, accuracy: 0 })
       
     } catch (error) {
       console.error('Failed to load oracle data:', error)
@@ -65,9 +54,8 @@ export default function OraclePage() {
 
   async function handleResolveMarket(marketId: string, winningOutcome: number, evidence: string) {
     try {
-      await resolveMarket(marketId, winningOutcome, evidence)
-      await loadOracleData()
-      alert('Market resolved successfully!')
+      // TODO: Implement via Markets SDK or direct API
+      alert('⚠️ Market resolution coming soon!')
     } catch (error: any) {
       alert(`Failed to resolve market: ${error.message}`)
     }
@@ -75,9 +63,8 @@ export default function OraclePage() {
 
   async function handleSignResolution(marketId: string) {
     try {
-      await signResolution(marketId)
-      await loadOracleData()
-      alert('Resolution signed successfully!')
+      // TODO: Implement via Markets SDK or direct API
+      alert('⚠️ Resolution signing coming soon!')
     } catch (error: any) {
       alert(`Failed to sign resolution: ${error.message}`)
     }
@@ -85,19 +72,17 @@ export default function OraclePage() {
 
   async function handleDispute(marketId: string, reason: string) {
     try {
-      await disputeResolution(marketId, reason)
-      await loadOracleData()
-      alert('Dispute submitted successfully!')
+      // TODO: Implement via Markets SDK or direct API
+      alert('⚠️ Dispute submission coming soon!')
     } catch (error: any) {
       alert(`Failed to dispute: ${error.message}`)
     }
   }
 
-  async function handleVote(disputeId: string, vote: boolean) {
+  async function handleVote(marketId: string, disputeId: string, vote: boolean) {
     try {
-      await voteOnDispute(disputeId, vote)
-      await loadOracleData()
-      alert('Vote recorded successfully!')
+      // TODO: Implement via Markets SDK or direct API
+      alert('⚠️ Voting coming soon!')
     } catch (error: any) {
       alert(`Failed to vote: ${error.message}`)
     }
@@ -137,7 +122,7 @@ export default function OraclePage() {
     )
   }
 
-  if (loading || !isConnected) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-dark">
         <Navigation />
@@ -304,13 +289,13 @@ export default function OraclePage() {
 
                   <div className="flex gap-3">
                     <button
-                      onClick={() => handleVote(dispute.id, true)}
+                      onClick={() => handleVote(dispute.market_id, dispute.id, true)}
                       className="flex-1 px-4 py-3 rounded-lg bg-prism-teal/20 text-prism-teal border border-prism-teal/50 hover:bg-prism-teal/30 transition-colors font-semibold"
                     >
                       ✓ Uphold Resolution
                     </button>
                     <button
-                      onClick={() => handleVote(dispute.id, false)}
+                      onClick={() => handleVote(dispute.market_id, dispute.id, false)}
                       className="flex-1 px-4 py-3 rounded-lg bg-prism-red/20 text-prism-red border border-prism-red/50 hover:bg-prism-red/30 transition-colors font-semibold"
                     >
                       ✗ Support Dispute

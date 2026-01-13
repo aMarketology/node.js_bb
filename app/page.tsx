@@ -5,10 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
 import Navigation from './components/Navigation'
 import Footer from './components/Footer'
-import { useLayer2 } from './contexts/Layer2Context'
 
-// Import L2 SDK
-const { L2MarketsSDK } = require('@/l2-markets-sdk.js')
+const L2_API = process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234'
 
 interface Market {
   id: string
@@ -37,7 +35,6 @@ export default function Home() {
 
   const categories = ['All', 'Sports', 'Politics', 'Crypto', 'Entertainment', 'Science']
   const statusFilters = ['All', 'Active', 'Pending', 'Frozen', 'Resolved']
-  const sdk = new L2MarketsSDK('http://localhost:1234')
 
   useEffect(() => {
     loadMarkets()
@@ -47,72 +44,95 @@ export default function Home() {
     setLoading(true)
     setError(null)
     try {
-      // Use SDK to get markets organized by status
-      const byStatus = await sdk.getEventsByStatus()
-      
-      // Update status counts
-      setStatusCounts(byStatus.summary)
-      
-      // Combine all markets based on status filter
-      let allMarkets: any[] = []
-      if (statusFilter === 'All') {
-        allMarkets = [...byStatus.pending, ...byStatus.active, ...byStatus.frozen, ...byStatus.resolved]
-      } else if (statusFilter === 'Pending') {
-        allMarkets = byStatus.pending
-      } else if (statusFilter === 'Active') {
-        allMarkets = byStatus.active
-      } else if (statusFilter === 'Frozen') {
-        allMarkets = byStatus.frozen
-      } else if (statusFilter === 'Resolved') {
-        allMarkets = byStatus.resolved
+      // Fetch markets directly from L2 API (no auth needed for viewing)
+      const response = await fetch(`${L2_API}/markets`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch markets: ${response.status}`)
       }
+      
+      const data = await response.json()
+      let allMarkets = data.markets || []
+      
+      // Calculate status counts from all markets
+      const pending = allMarkets.filter((m: any) => m.status === 'pending')
+      const active = allMarkets.filter((m: any) => m.status === 'active')
+      const frozen = allMarkets.filter((m: any) => m.status === 'frozen')
+      const resolved = allMarkets.filter((m: any) => m.status === 'resolved')
+      
+      setStatusCounts({
+        pending: pending.length,
+        active: active.length,
+        frozen: frozen.length,
+        resolved: resolved.length
+      })
+      
+      // Filter by status
+      if (statusFilter === 'Pending') {
+        allMarkets = pending
+      } else if (statusFilter === 'Active') {
+        allMarkets = active
+      } else if (statusFilter === 'Frozen') {
+        allMarkets = frozen
+      } else if (statusFilter === 'Resolved') {
+        allMarkets = resolved
+      }
+      // 'All' shows everything
       
       // Filter by category if needed
       if (activeCategory !== 'All') {
-        allMarkets = allMarkets.filter(m => 
-          m.category?.toLowerCase() === activeCategory.toLowerCase() ||
-          m.marketCategory?.toLowerCase() === activeCategory.toLowerCase()
+        allMarkets = allMarkets.filter((m: any) => 
+          m.category?.toLowerCase() === activeCategory.toLowerCase()
         )
       }
       
       // Format for display
       const formatted = allMarkets.map((m: any) => ({
-        id: m.id,
+        id: m.id || m.market_id,
         title: m.title,
-        description: m.description,
-        outcomes: m.outcomes || [],
-        status: m.status,
-        totalVolume: m.totalVolume || 0,
-        betCount: m.betCount || 0,
-        category: m.category || m.marketCategory || activeCategory,
-        bettingClosesAt: m.bettingClosesAt,
-        prices: m.prices || [],
-        hasLiquidity: m.hasLiquidity,
-        liquidity: m.liquidity || 0
+        description: m.description || '',
+        outcomes: m.options || m.outcomes || [],
+        status: m.status || 'pending',
+        totalVolume: m.total_volume || m.totalVolume || 0,
+        betCount: m.bet_count || m.betCount || 0,
+        category: m.category || 'Other',
+        bettingClosesAt: m.closes_at,
+        prices: m.prices || m.current_prices || [],
+        hasLiquidity: (m.cpmm_pool?.total_liquidity || 0) > 0,
+        liquidity: m.cpmm_pool?.total_liquidity || 0
       }))
       
       setMarkets(formatted)
       
       // Set featured markets (top active by volume)
-      setFeaturedMarkets(byStatus.active.slice(0, 3).map((m: any) => ({
-        id: m.id,
+      const featuredActive = active
+        .sort((a: any, b: any) => (b.total_volume || 0) - (a.total_volume || 0))
+        .slice(0, 3)
+      
+      setFeaturedMarkets(featuredActive.map((m: any) => ({
+        id: m.id || m.market_id,
         title: m.title,
-        description: m.description,
-        outcomes: m.outcomes || [],
-        status: m.status,
-        totalVolume: m.totalVolume || 0,
-        betCount: m.betCount || 0,
-        category: m.category,
-        bettingClosesAt: m.bettingClosesAt,
-        prices: m.prices || [],
-        hasLiquidity: m.hasLiquidity,
-        liquidity: m.liquidity || 0
+        description: m.description || '',
+        outcomes: m.options || m.outcomes || [],
+        status: m.status || 'active',
+        totalVolume: m.total_volume || 0,
+        betCount: m.bet_count || 0,
+        category: m.category || 'Other',
+        bettingClosesAt: m.closes_at,
+        prices: m.prices || m.current_prices || [],
+        hasLiquidity: (m.cpmm_pool?.total_liquidity || 0) > 0,
+        liquidity: m.cpmm_pool?.total_liquidity || 0
       })))
       
-      console.log('✅ Loaded markets:', byStatus.summary)
+      console.log('✅ Loaded markets from L2:', { 
+        total: allMarkets.length,
+        pending: pending.length, 
+        active: active.length, 
+        frozen: frozen.length, 
+        resolved: resolved.length 
+      })
     } catch (err: any) {
       console.error('Failed to load markets:', err)
-      setError(`Cannot connect to Layer 2 server`)
+      setError(`Cannot connect to Layer 2 server at ${L2_API}`)
       setMarkets([])
     } finally {
       setLoading(false)

@@ -5,14 +5,14 @@ import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Navigation from '@/app/components/Navigation'
 import Footer from '@/app/components/Footer'
-import { useLayer2 } from '@/app/contexts/Layer2Context'
+import { useMarkets } from '@/app/contexts/MarketsContext'
 import { useAuth } from '@/app/contexts/AuthContext'
 
 export default function MarketDetailPage() {
   const params = useParams()
   const slug = params?.slug as string
   
-  const { getMarket, getPosition, placeBet, getQuote, sellShares, isConnected } = useLayer2()
+  const { getMarket, getPosition, placeBet, getQuote, sellShares, isReady } = useMarkets()
   const { isAuthenticated, activeWallet } = useAuth()
   
   const [market, setMarket] = useState<any>(null)
@@ -25,7 +25,7 @@ export default function MarketDetailPage() {
 
   useEffect(() => {
     loadMarket()
-  }, [slug, isConnected])
+  }, [slug, isReady])
 
   useEffect(() => {
     if (isAuthenticated && market) {
@@ -264,7 +264,7 @@ export default function MarketDetailPage() {
                       Sign In
                     </button>
                   </div>
-                ) : !isConnected ? (
+                ) : !isReady ? (
                   <div className="text-center py-8">
                     <p className="text-gray-400">Connecting to L2...</p>
                     <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-prism-teal mx-auto mt-4"></div>

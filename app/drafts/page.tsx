@@ -4,11 +4,10 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import Navigation from '@/app/components/Navigation'
 import Footer from '@/app/components/Footer'
-import { useLayer2 } from '@/app/contexts/Layer2Context'
 import { useAuth } from '@/app/contexts/AuthContext'
 
 export default function DraftsPage() {
-  const { createDraftProp, fundDraft, getMyDrafts, editDraft, deleteDraft, isConnected } = useLayer2()
+  // TODO: Implement draft functionality through Markets SDK
   const { isAuthenticated } = useAuth()
   
   const [myDrafts, setMyDrafts] = useState<any[]>([])
@@ -24,18 +23,14 @@ export default function DraftsPage() {
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    if (isAuthenticated && isConnected) {
+    if (isAuthenticated) {
       loadDrafts()
     }
-  }, [isAuthenticated, isConnected])
+  }, [isAuthenticated])
 
   async function loadDrafts() {
     try {
       setLoading(true)
-      
-      // Get drafts created by this user
-      const my = await getMyDrafts()
-      setMyDrafts(my || [])
       
       // Get all draft markets from API
       const res = await fetch('http://localhost:1234/markets/drafts')
@@ -58,18 +53,9 @@ export default function DraftsPage() {
     
     try {
       setCreating(true)
-      const validOutcomes = outcomes.filter(o => o.trim())
-      await createDraftProp(title, validOutcomes, description, parseFloat(initialLiquidity) || 0)
-      
-      // Reset form
-      setTitle('')
-      setDescription('')
-      setOutcomes(['', ''])
-      setInitialLiquidity('')
+      // TODO: Implement via Markets SDK or direct API
+      alert('⚠️ Draft creation coming soon!')
       setShowCreateForm(false)
-      
-      await loadDrafts()
-      alert('Draft prop created successfully!')
     } catch (error: any) {
       alert(`Failed to create draft: ${error.message}`)
     } finally {
@@ -79,9 +65,8 @@ export default function DraftsPage() {
 
   async function handleFundDraft(marketId: string, amount: number) {
     try {
-      await fundDraft(marketId, amount)
-      await loadDrafts()
-      alert(`Funded ${amount} BB successfully!`)
+      // TODO: Implement via Markets SDK or direct API
+      alert('⚠️ Draft funding coming soon!')
     } catch (error: any) {
       alert(`Failed to fund draft: ${error.message}`)
     }
@@ -91,9 +76,8 @@ export default function DraftsPage() {
     if (!confirm('Are you sure you want to delete this draft?')) return
     
     try {
-      await deleteDraft(marketId)
-      await loadDrafts()
-      alert('Draft deleted successfully!')
+      // TODO: Implement via Markets SDK or direct API
+      alert('⚠️ Draft deletion coming soon!')
     } catch (error: any) {
       alert(`Failed to delete draft: ${error.message}`)
     }
@@ -130,7 +114,7 @@ export default function DraftsPage() {
     )
   }
 
-  if (loading || !isConnected) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-dark">
         <Navigation />

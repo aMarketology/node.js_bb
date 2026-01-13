@@ -5,16 +5,19 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAuth } from '@/app/contexts/AuthContext'
 import { useFractal } from '@/app/contexts/FractalContext'
+import { useCreditPrediction } from '@/app/contexts/CreditPredictionContext'
 import { formatAddress } from '@/lib/blockchain'
 import AuthModal from './AuthModal'
 
 export default function Navigation() {
   const { user, walletAddress, isAuthenticated, isKYCVerified, signOut, activeWallet, switchWallet } = useAuth()
   const { fractalEnabled, setFractalEnabled } = useFractal()
+  const { hasActiveCredit, activeSession, balance, settleCredit } = useCreditPrediction()
   const [scrolled, setScrolled] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [grayscaleMode, setGrayscaleMode] = useState(false)
+  const [settlingCredit, setSettlingCredit] = useState(false)
 
   useEffect(() => {
     const handleScroll = () => {
@@ -122,6 +125,39 @@ export default function Navigation() {
                 {grayscaleMode ? 'Disable' : 'Enable'} High Contrast
               </div>
             </motion.button>
+
+            {/* Credit Session Indicator */}
+            {isAuthenticated && hasActiveCredit && activeSession && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="ml-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/50"
+              >
+                <span className="text-lg">💳</span>
+                <div className="text-xs">
+                  <div className="text-purple-300 font-semibold">Credit Active</div>
+                  <div className="text-gray-400">{balance.available.toLocaleString()} BB</div>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (settlingCredit) return
+                    setSettlingCredit(true)
+                    try {
+                      const result = await settleCredit()
+                      if (result.success) {
+                        alert(`✅ Credit settled! P&L: ${result.pnl >= 0 ? '+' : ''}${result.pnl} BB`)
+                      }
+                    } finally {
+                      setSettlingCredit(false)
+                    }
+                  }}
+                  disabled={settlingCredit}
+                  className="ml-1 px-2 py-1 rounded bg-purple-500/30 hover:bg-purple-500/50 text-purple-200 text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  {settlingCredit ? '...' : 'Settle'}
+                </button>
+              </motion.div>
+            )}
 
             {/* Desktop Menu */}
             <div className="hidden md:flex items-center gap-8">

@@ -1,7 +1,8 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { AuthProvider } from './contexts/AuthContext'
-import { Layer2Provider } from './contexts/Layer2Context'
+import { MarketsProvider } from './contexts/MarketsContext'
+import { CreditPredictionProvider } from './contexts/CreditPredictionContext'
 import { ClientLayout } from './ClientLayout'
 
 export const metadata: Metadata = {
@@ -21,9 +22,11 @@ export default function RootLayout({
         <ClientLayout>
           <div id="grayscale-wrapper">
             <AuthProvider>
-              <Layer2Provider>
-                {children}
-              </Layer2Provider>
+              <MarketsProvider>
+                <CreditPredictionProvider>
+                  {children}
+                </CreditPredictionProvider>
+              </MarketsProvider>
             </AuthProvider>
           </div>
         </ClientLayout>
