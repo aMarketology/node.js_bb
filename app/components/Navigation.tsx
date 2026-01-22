@@ -161,14 +161,7 @@ export default function Navigation() {
 
             {/* Desktop Menu */}
             <div className="hidden md:flex items-center gap-8">
-              <NavLink href="/#matches">Matches</NavLink>
               <NavLink href="/markets">Markets</NavLink>
-              <NavLink href="/drafts">Drafts</NavLink>
-              {isAuthenticated && (activeWallet === 'alice' || activeWallet === 'bob') && (
-                <NavLink href="/oracle">Oracle</NavLink>
-              )}
-              <NavLink href="/ledger">Ledger</NavLink>
-              <NavLink href="/#leaderboard">Leaderboard</NavLink>
               {isAuthenticated && <NavLink href="/wallet">Wallet</NavLink>}
               
               {/* Auth Section */}
