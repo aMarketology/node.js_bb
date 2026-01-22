@@ -3,7 +3,12 @@ import './globals.css'
 import { AuthProvider } from './contexts/AuthContext'
 import { MarketsProvider } from './contexts/MarketsContext'
 import { CreditPredictionProvider } from './contexts/CreditPredictionContext'
+import { SettlementProvider } from './contexts/SettlementContext'
+import { UnifiedSDKProvider } from './contexts/UnifiedSDKContext'
 import { ClientLayout } from './ClientLayout'
+import GoogleAnalytics from './components/GoogleAnalytics'
+import AnalyticsProvider from './components/AnalyticsProvider'
+import CookieConsent from './components/CookieConsent'
 
 export const metadata: Metadata = {
   title: 'Prism World Cup 2026 | Prediction Market',
@@ -18,15 +23,25 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <GoogleAnalytics />
+      </head>
       <body className="antialiased">
         <ClientLayout>
           <div id="grayscale-wrapper">
             <AuthProvider>
-              <MarketsProvider>
-                <CreditPredictionProvider>
-                  {children}
-                </CreditPredictionProvider>
-              </MarketsProvider>
+              <AnalyticsProvider>
+                <UnifiedSDKProvider>
+                  <MarketsProvider>
+                    <CreditPredictionProvider>
+                      <SettlementProvider>
+                        {children}
+                      </SettlementProvider>
+                    </CreditPredictionProvider>
+                  </MarketsProvider>
+                </UnifiedSDKProvider>
+              </AnalyticsProvider>
+              <CookieConsent />
             </AuthProvider>
           </div>
         </ClientLayout>

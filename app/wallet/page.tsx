@@ -1,5 +1,8 @@
 // BlackBook L1 Wallet Page
 // Full wallet management with creation flow and transaction signing
+// 
+// SECURITY: Private keys are NEVER stored. They are derived on-demand
+// using Argon2id from the user's password + encrypted vault.
 
 'use client'
 
@@ -9,15 +12,18 @@ import { useAuth } from '@/app/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import Navigation from '@/app/components/Navigation'
 import Footer from '@/app/components/Footer'
+import BridgeInterface from '@/app/components/BridgeInterface'
+import PasswordPrompt from '@/app/components/PasswordPrompt'
 import { 
   createWallet, 
-  unlockWallet, 
-  sendTransfer, 
+  sendTransfer,
+  sendTransferSecure,
   getBalance, 
   getTransactionHistory,
   forkPassword,
   bytesToHex,
-  type UnlockedWallet 
+  type UnlockedWallet,
+  type VaultSession
 } from '@/lib/blackbook-wallet'
 import { saveWalletVault, getWalletVault, hasWallet } from '@/lib/supabase'
 import { 
@@ -53,7 +59,18 @@ type WalletCreationStep = 'password' | 'mnemonic' | 'verify' | 'complete'
 type ModalType = 'none' | 'create' | 'unlock' | 'send'
 
 export default function WalletPage() {
-  const { user, isAuthenticated, loading: authLoading, walletAddress, refreshProfile, activeWallet } = useAuth()
+  const { 
+    user, 
+    isAuthenticated, 
+    loading: authLoading, 
+    walletAddress, 
+    refreshProfile, 
+    activeWallet,
+    vaultSession,
+    getPassword,
+    isPasswordUnlocked,
+    unlockWithPassword
+  } = useAuth()
   
   // Get wallet owner name based on active wallet
   const getWalletOwnerName = () => {
@@ -73,7 +90,7 @@ export default function WalletPage() {
     hasVault: false
   })
   
-  // Unlocked wallet (in memory only)
+  // Unlocked wallet (in memory only) - for test accounts only
   const [unlockedWallet, setUnlockedWallet] = useState<UnlockedWallet | null>(null)
   
   // Track if we're currently loading to prevent duplicate calls
@@ -81,7 +98,7 @@ export default function WalletPage() {
   
   // Modal states
   const [activeModal, setActiveModal] = useState<ModalType>('none')
-  const [activeTab, setActiveTab] = useState<'overview' | 'send' | 'receive' | 'history'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'bridge' | 'send' | 'receive' | 'history'>('overview')
 
   // Wallet creation flow
   const [creationStep, setCreationStep] = useState<WalletCreationStep>('password')
@@ -94,7 +111,7 @@ export default function WalletPage() {
   const [creationLoading, setCreationLoading] = useState(false)
   const [creationError, setCreationError] = useState('')
 
-  // Unlock modal
+  // Unlock modal - no longer needed for user's wallet (password in memory)
   const [unlockPassword, setUnlockPassword] = useState('')
   const [unlockLoading, setUnlockLoading] = useState(false)
   const [unlockError, setUnlockError] = useState('')
@@ -105,6 +122,14 @@ export default function WalletPage() {
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const [sendSuccess, setSendSuccess] = useState('')
+  
+  // Password prompt for when session expires
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false)
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
+  const [passwordError, setPasswordError] = useState('')
+  
+  // Vault migration
+  const [showVaultMigration, setShowVaultMigration] = useState(false)
   
   // Wallet migration/reset state
   const [showMigrationPrompt, setShowMigrationPrompt] = useState(false)
@@ -182,47 +207,6 @@ export default function WalletPage() {
     }
   }, [activeWallet]) // Only depend on activeWallet, not walletAddress
 
-  // Auto-unlock wallet using stored session key
-  const attemptAutoUnlock = useCallback(async (userId: string, blackbookAddress: string) => {
-    const storedKey = getStoredWalletKey() // Already returns Uint8Array
-    if (!storedKey) {
-      console.log('No stored wallet key found')
-      setShowMigrationPrompt(true)
-      return false
-    }
-
-    try {
-      // Get vault from Supabase
-      const vaultData = await getWalletVault(userId)
-      if (!vaultData || !vaultData.encrypted_blob) {
-        console.log('No vault data found')
-        return false
-      }
-
-      // storedKey is already Uint8Array - use directly
-      const unlockedData = await unlockWallet(
-        '', // password not needed when we have the vaultKey directly
-        vaultData.encrypted_blob,
-        vaultData.nonce,
-        '', // auth salt not needed
-        vaultData.vault_salt,
-        storedKey // Pass the vaultKey directly (already Uint8Array)
-      )
-
-      if (unlockedData) {
-        setUnlockedWallet(unlockedData)
-        setShowMigrationPrompt(false)
-        console.log('✅ Wallet auto-unlocked from session')
-        return true
-      }
-    } catch (error) {
-      console.log('Auto-unlock failed:', error)
-      clearWalletKey() // Clear invalid key
-      setShowMigrationPrompt(true) // Show migration prompt on failure
-    }
-    return false
-  }, [])
-
   // Check for existing wallet and load data (only for user's own wallet)
   useEffect(() => {
     async function initWallet() {
@@ -284,9 +268,10 @@ export default function WalletPage() {
             console.warn('⚠️ Cannot sync - wallet exists:', walletExists, 'auth_id:', user.auth_id)
           }
           
-          // Try auto-unlock if vault exists and wallet not already unlocked
-          if (walletExists && !unlockedWallet) {
-            await attemptAutoUnlock(user.user_id, user.blackbook_address)
+          // Wallet session is now loaded via AuthContext at login
+          // No need for attemptAutoUnlock - password is stored in memory
+          if (vaultSession) {
+            console.log('✅ Vault session available for secure signing')
           }
         } else {
           setWallet(prev => ({ 
@@ -302,7 +287,7 @@ export default function WalletPage() {
     }
 
     initWallet()
-  }, [user?.user_id, user?.blackbook_address, activeWallet]) // Only re-run when these specific values change
+  }, [user?.user_id, user?.blackbook_address, activeWallet, vaultSession]) // Only re-run when these specific values change
 
   // Show loading screen while auth is initializing to prevent flash
   if (authLoading) {
@@ -407,7 +392,7 @@ export default function WalletPage() {
     }
   }
 
-  const handlePasswordSubmit = async () => {
+  const handleCreatePasswordSubmit = async () => {
     if (createPassword.length < 8) {
       setCreationError('Password must be at least 8 characters')
       return
@@ -457,29 +442,30 @@ export default function WalletPage() {
     setCreationError('')
 
     try {
-      // Get or generate session key
-      let sessionKey = getStoredWalletKey()
-      if (!sessionKey) {
-        // Generate a new encryption key for this session
-        const { randomBytes } = await import('@/lib/blackbook-wallet')
-        sessionKey = randomBytes(32)
-        storeWalletKey(sessionKey)
+      // Get the user's password for encryption (must be stored from login)
+      const password = getPassword()
+      if (!password) {
+        throw new Error('Password not available. Please log out and log in again.')
       }
       
-      // Create wallet using session key
-      const { encryptVault, mnemonicToSeed, createKeyPair, deriveL1Address, bytesToHex: toHex, randomBytes: genBytes } = await import('@/lib/blackbook-wallet')
+      // Create wallet using password for encryption
+      const { encryptVault, mnemonicToSeed, createKeyPair, bytesToHex: toHex, randomBytes: genBytes, deriveEncryptionKey } = await import('@/lib/blackbook-wallet')
+      const { deriveL1Address } = await import('@/lib/address-utils')
       
       // Derive seed and keypair from mnemonic
       const seed = await mnemonicToSeed(generatedMnemonic)
-      const keyPair = createKeyPair(seed)
-      const address = await deriveL1Address(keyPair.publicKey)
+      const keyPair = await createKeyPair(seed)
+      const address = deriveL1Address(keyPair.publicKey)
       
-      // Generate random salts
+      // Generate random salt
       const vaultSalt = toHex(genBytes(32))
       const authSalt = toHex(genBytes(32))
       
-      // Encrypt with session key
-      const { ciphertext, nonce } = await encryptVault(generatedMnemonic, sessionKey, vaultSalt)
+      // Derive encryption key from password and salt using PBKDF2
+      const encryptionKey = await deriveEncryptionKey(password, vaultSalt)
+      
+      // Encrypt the seed (raw 32 bytes) with PBKDF2-derived key
+      const { ciphertext, nonce } = await encryptVault(seed, encryptionKey)
       
       const walletData = {
         mnemonic: generatedMnemonic,
@@ -545,6 +531,10 @@ export default function WalletPage() {
   // WALLET UNLOCK
   // ═══════════════════════════════════════════════════════════════
 
+  /**
+   * Legacy unlock handler - kept for migration purposes
+   * New flow uses vaultSession + password from AuthContext
+   */
   const handleUnlock = async () => {
     if (!user?.user_id || !unlockPassword) return
 
@@ -558,23 +548,12 @@ export default function WalletPage() {
         throw new Error('No wallet vault found')
       }
 
-      // Derive vault key from password
-      const { vaultKey } = await forkPassword(unlockPassword, vault.auth_salt, vault.vault_salt)
+      // Derive vault key from password using new Argon2id
+      const { vaultKey } = await forkPassword(unlockPassword, vault.vault_salt)
 
-      // Unlock wallet
-      const unlocked = await unlockWallet(
-        unlockPassword,
-        vault.encrypted_blob,
-        vault.nonce,
-        vault.auth_salt,
-        vault.vault_salt,
-        vaultKey
-      )
-
-      // Store vaultKey in session for auto-unlock
+      // Store vaultKey in session for legacy auto-unlock
       storeWalletKey(vaultKey)
       
-      setUnlockedWallet(unlocked)
       setActiveModal('none')
       setUnlockPassword('')
 
@@ -583,6 +562,7 @@ export default function WalletPage() {
         setActiveModal('send')
       }
     } catch (error: any) {
+      console.error('Unlock failed:', error)
       setUnlockError('Invalid password or corrupted vault')
     } finally {
       setUnlockLoading(false)
@@ -594,49 +574,33 @@ export default function WalletPage() {
   // ═══════════════════════════════════════════════════════════════
 
   const handleSendClick = async () => {
-    if (unlockedWallet) {
-      setActiveModal('send')
+    // For test accounts (Alice/Bob), use unlocked wallet
+    if (activeWallet === 'alice' || activeWallet === 'bob') {
+      if (unlockedWallet) {
+        setActiveModal('send')
+      } else {
+        alert('Test wallet not loaded')
+      }
       return
     }
     
-    // Must be logged in to send
-    if (!user?.user_id || !user?.blackbook_address) {
-      alert('Please log in to send transactions')
+    // For user's wallet, check if vault session and password are available
+    if (!vaultSession) {
+      alert('Wallet not loaded. Please log in again.')
       return
     }
     
-    // Try to auto-unlock with session key
-    const unlocked = await attemptAutoUnlock(user.user_id, user.blackbook_address)
-    if (unlocked) {
-      setActiveModal('send')
-    } else {
-      alert('Unable to unlock wallet. Please try logging out and back in.')
+    if (!getPassword()) {
+      alert('Session expired. Please log in again to send transactions.')
+      return
     }
+    
+    setActiveModal('send')
   }
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    let currentWallet = unlockedWallet
-    
-    if (!currentWallet) {
-      // Try auto-unlock first
-      if (user?.user_id && user?.blackbook_address) {
-        const unlocked = await attemptAutoUnlock(user.user_id, user.blackbook_address)
-        if (!unlocked) {
-          setSendError('Unable to unlock wallet. Please try logging out and back in, or reset your wallet.')
-          return
-        }
-        // attemptAutoUnlock sets unlockedWallet via setState, but we need to wait
-        // Since we can't get the value synchronously, return and let user retry
-        setSendError('Wallet unlocked. Please try sending again.')
-        return
-      } else {
-        setSendError('Please log in to send transactions')
-        return
-      }
-    }
-
     setSending(true)
     setSendError('')
     setSendSuccess('')
@@ -650,7 +614,32 @@ export default function WalletPage() {
         throw new Error('Insufficient balance')
       }
 
-      const result = await sendTransfer(L1_API_URL, currentWallet, sendTo, amount)
+      let result: { success: boolean; tx_id?: string; error?: string }
+
+      // For test accounts, use the old method with unlocked wallet
+      if (activeWallet === 'alice' || activeWallet === 'bob') {
+        if (!unlockedWallet) {
+          throw new Error('Test wallet not loaded')
+        }
+        result = await sendTransfer(L1_API_URL, unlockedWallet, sendTo, amount)
+      } else {
+        // For user's wallet, check if password is still unlocked
+        if (!vaultSession) {
+          throw new Error('Session not found. Please log in again.')
+        }
+        
+        const password = getPassword()
+        if (!password || !isPasswordUnlocked()) {
+          // Password expired - show prompt
+          setSending(false)
+          setPendingAction(() => () => handleSend(e))
+          setShowPasswordPrompt(true)
+          return
+        }
+        
+        console.log('🔐 Using secure transfer with on-demand key derivation')
+        result = await sendTransferSecure(vaultSession, password, sendTo, amount)
+      }
 
       if (result.success) {
         setSendSuccess(`Transaction sent! TX ID: ${result.tx_id}`)
@@ -667,6 +656,125 @@ export default function WalletPage() {
       setSendError(error.message || 'Failed to send transaction')
     } finally {
       setSending(false)
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PASSWORD PROMPT HANDLER (for expired sessions)
+  // ═══════════════════════════════════════════════════════════════
+
+  const handlePasswordSubmit = async (password: string): Promise<boolean> => {
+    try {
+      setPasswordError('')
+      
+      // First, try to unlock with the password
+      const success = unlockWithPassword(password)
+      if (!success) {
+        setPasswordError('Failed to store password')
+        return false
+      }
+      
+      // Now test if we can decrypt the vault with this password
+      if (vaultSession) {
+        const { derivePrivateKeyOnDemand } = await import('@/lib/blackbook-wallet')
+        try {
+          const keypair = await derivePrivateKeyOnDemand(vaultSession, password)
+          
+          if (keypair) {
+            // Success! Close prompt and execute pending action
+            setShowPasswordPrompt(false)
+            setPasswordError('')
+            
+            if (pendingAction) {
+              pendingAction()
+              setPendingAction(null)
+            }
+            
+            return true
+          }
+        } catch (error: any) {
+          console.error('Decryption test failed:', error)
+          
+          // Check if it's a decryption error - might need vault migration
+          if (error.message?.includes('decrypt')) {
+            setPasswordError('Your vault was encrypted with an old method. Please use the "Migrate Vault" option below.')
+            setShowVaultMigration(true)
+            return false
+          }
+          
+          setPasswordError('Incorrect password or vault corrupted')
+          return false
+        }
+      }
+      
+      return false
+    } catch (error: any) {
+      console.error('Password submit error:', error)
+      setPasswordError(error.message || 'Failed to unlock')
+      return false
+    }
+  }
+
+  // Handle complete wallet reset (create fresh wallet)
+  const handleCompleteReset = () => {
+    setShowPasswordPrompt(false)
+    setPasswordError('')
+    handleResetWallet()
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // VAULT MIGRATION (re-encrypt with new PBKDF2 method)
+  // ═══════════════════════════════════════════════════════════════
+
+  const handleMigrateVault = async () => {
+    if (!user || !user.auth_id) {
+      alert('User not found')
+      return
+    }
+
+    const password = prompt('⚠️ VAULT MIGRATION\n\nTo re-encrypt your vault with the new security method, enter your password:')
+    if (!password) return
+
+    try {
+      setCreationLoading(true)
+      setCreationError('')
+
+      // Create a new wallet with the same password using new PBKDF2 method
+      console.log('🔄 Creating new wallet with PBKDF2 encryption...')
+      const walletData = await createWallet(password)
+
+      if (!walletData) {
+        throw new Error('Failed to create wallet')
+      }
+
+      // Save the new vault to Supabase
+      console.log('💾 Saving migrated vault...')
+      const saved = await saveWalletVault({
+        user_id: user.user_id,
+        auth_id: user.auth_id,
+        encrypted_blob: walletData.encryptedVault.ciphertext,
+        nonce: walletData.encryptedVault.nonce,
+        vault_salt: walletData.vaultSalt,
+        auth_salt: walletData.authSalt,
+        blackbook_address: walletData.address,
+        public_key: walletData.publicKey,
+        vault_version: 2
+      })
+
+      if (!saved) {
+        throw new Error('Failed to save vault')
+      }
+
+      alert('✅ Vault migrated successfully! Your wallet has been re-encrypted with the new PBKDF2 method. Please refresh the page.')
+      
+      // Refresh the page to reload everything
+      window.location.reload()
+      
+    } catch (error: any) {
+      console.error('Vault migration failed:', error)
+      setCreationError(error.message || 'Failed to migrate vault')
+    } finally {
+      setCreationLoading(false)
     }
   }
 
@@ -734,6 +842,20 @@ export default function WalletPage() {
     <div className="min-h-screen bg-dark">
       {/* Load tweetnacl for Ed25519 */}
       <script src="https://cdn.jsdelivr.net/npm/tweetnacl/nacl-fast.min.js" async />
+      
+      {/* Password Prompt for expired sessions */}
+      <PasswordPrompt
+        isOpen={showPasswordPrompt}
+        onClose={() => {
+          setShowPasswordPrompt(false)
+          setPendingAction(null)
+          setPasswordError('')
+        }}
+        onSubmit={handlePasswordSubmit}
+        title="Session Expired"
+        message="Your 15-minute session has expired. Please enter your password to continue."
+        externalError={passwordError}
+      />
       
       <Navigation />
       
@@ -813,11 +935,13 @@ export default function WalletPage() {
               {wallet.hasVault && (
                 <div className="mb-4 flex items-center gap-2">
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    unlockedWallet 
+                    unlockedWallet || (vaultSession && activeWallet === 'user')
                       ? 'bg-green-500/20 text-green-400' 
                       : 'bg-yellow-500/20 text-yellow-400'
                   }`}>
-                    {unlockedWallet ? `🔓 ${activeWallet === 'alice' ? "Alice's" : activeWallet === 'bob' ? "Bob's" : 'Wallet'} Unlocked` : '🔒 Wallet Locked'}
+                    {unlockedWallet || (vaultSession && activeWallet === 'user') 
+                      ? `🔓 ${activeWallet === 'alice' ? "Alice's" : activeWallet === 'bob' ? "Bob's" : 'Wallet'} Unlocked` 
+                      : '🔒 Wallet Locked'}
                   </span>
                   {unlockedWallet && (
                     <button
@@ -825,6 +949,16 @@ export default function WalletPage() {
                       className="text-sm text-gray-500 hover:text-gray-300"
                     >
                       Lock Now
+                    </button>
+                  )}
+                  {showVaultMigration && activeWallet === 'user' && (
+                    <button
+                      onClick={handleMigrateVault}
+                      disabled={creationLoading}
+                      className="px-3 py-1 rounded-full text-sm font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30 transition-colors disabled:opacity-50"
+                      title="Re-encrypt vault with new PBKDF2 method"
+                    >
+                      {creationLoading ? '⏳ Migrating...' : '🔄 Migrate Vault'}
                     </button>
                   )}
                 </div>
@@ -905,7 +1039,7 @@ export default function WalletPage() {
 
               {/* Tabs */}
               <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-                {(['overview', 'send', 'receive', 'history'] as const).map((tab) => (
+                {(['overview', 'bridge', 'send', 'receive', 'history'] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -993,6 +1127,18 @@ export default function WalletPage() {
                   </motion.div>
                 )}
 
+                {activeTab === 'bridge' && (
+                  <motion.div
+                    key="bridge"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="max-w-2xl mx-auto"
+                  >
+                    <BridgeInterface />
+                  </motion.div>
+                )}
+
                 {activeTab === 'send' && (
                   <motion.div
                     key="send"
@@ -1004,7 +1150,7 @@ export default function WalletPage() {
                     <div className="bg-dark-100 border border-dark-border rounded-2xl p-6">
                       <h3 className="text-xl font-bold text-white mb-6">Send BB Tokens</h3>
                       
-                      {!unlockedWallet && wallet.hasVault && (
+                      {!unlockedWallet && !vaultSession && wallet.hasVault && (
                         <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
                           <p className="text-yellow-400 text-sm flex items-center gap-2">
                             <span>🔒</span>
@@ -1071,10 +1217,10 @@ export default function WalletPage() {
 
                         <button
                           type="submit"
-                          disabled={sending || !sendTo || !sendAmount || (!unlockedWallet && wallet.hasVault)}
+                          disabled={sending || !sendTo || !sendAmount || (!unlockedWallet && !vaultSession && wallet.hasVault)}
                           className="w-full px-6 py-4 rounded-xl font-bold text-white prism-gradient-bg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {sending ? 'Signing & Sending...' : unlockedWallet ? 'Send BB' : 'Unlock to Send'}
+                          {sending ? 'Signing & Sending...' : (unlockedWallet || vaultSession) ? 'Send BB' : 'Unlock to Send'}
                         </button>
                       </form>
                     </div>

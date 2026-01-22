@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 import { useAuth } from './AuthContext'
-import { CreditPredictionSDK } from '@/credit-prediction-actions-sdk.js'
+import { CreditPredictionSDK } from '@/sdk/credit-prediction-actions-sdk.js'
 import nacl from 'tweetnacl'
 
 const L2_API = process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234'
@@ -52,6 +52,13 @@ interface CreditPredictionContextType {
   // Balance
   balance: { available: number; locked: number }
   refreshBalance: () => Promise<void>
+  
+  // Bridge (L1 → L2)
+  getL1Balance: () => Promise<{ available: number; locked: number }>
+  bridge: (amount: number) => Promise<{ success: boolean; lockId: string; newL2Balance: number }>
+  
+  // Withdrawal (L2 → L1)
+  withdraw: (amount: number) => Promise<{ success: boolean; requestId?: string; status?: string; message?: string }>
   
   // Betting
   getQuote: (marketId: string, outcomeIndex: number, amount: number) => Promise<BetQuote>
@@ -148,7 +155,9 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
     loadInitialData(newSdk)
 
     return () => {
-      unsubscribe()
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
     }
   }, [isAuthenticated, activeWallet, activeWalletData])
 
@@ -240,6 +249,37 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
   }, [sdk])
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // BRIDGE FUNCTIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const getL1Balance = useCallback(async () => {
+    if (!sdk) throw new Error('SDK not initialized')
+    return sdk.getL1Balance()
+  }, [sdk])
+
+  const bridge = useCallback(async (amount: number) => {
+    if (!sdk) throw new Error('SDK not initialized')
+    const result = await sdk.bridge(amount)
+    if (result.success) {
+      await refreshBalance()
+    }
+    return result
+  }, [sdk])
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // WITHDRAWAL FUNCTIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const withdraw = useCallback(async (amount: number) => {
+    if (!sdk) throw new Error('SDK not initialized')
+    const result = await (sdk as any).requestWithdrawal(amount)
+    if (result.success) {
+      await refreshBalance()
+    }
+    return result
+  }, [sdk, refreshBalance])
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // BETTING FUNCTIONS
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -318,6 +358,9 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
     refreshCreditSession,
     balance,
     refreshBalance,
+    getL1Balance,
+    bridge,
+    withdraw,
     getQuote,
     placeBet,
     sellPosition,

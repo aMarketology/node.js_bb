@@ -7,7 +7,10 @@ import Navigation from '@/app/components/Navigation'
 import Footer from '@/app/components/Footer'
 import { useMarkets } from '@/app/contexts/MarketsContext'
 import { useCreditPrediction } from '@/app/contexts/CreditPredictionContext'
+import { useSettlement } from '@/app/contexts/SettlementContext'
 import { useAuth } from '@/app/contexts/AuthContext'
+import L2AccountInitPrompt from '@/app/components/L2AccountInitPrompt'
+import SettlementBettingInterface from '@/app/components/SettlementBettingInterface'
 
 export default function MarketDetailPage() {
   const params = useParams()
@@ -38,6 +41,9 @@ export default function MarketDetailPage() {
     refreshBalance
   } = useCreditPrediction()
   
+  // Settlement for L1-backed betting
+  const { isConnected: settlementConnected, healthStatus } = useSettlement()
+  
   const { isAuthenticated, activeWallet } = useAuth()
   
   // Combined connection status
@@ -54,11 +60,17 @@ export default function MarketDetailPage() {
   const [addingLiquidity, setAddingLiquidity] = useState(false)
   const [showLiquidityPanel, setShowLiquidityPanel] = useState(false)
   
+  // Settlement-based betting toggle
+  const [useSettlementBetting, setUseSettlementBetting] = useState(true)
+  
   // Credit Line state
   const [creditAmount, setCreditAmount] = useState('1000')
   const [openingCredit, setOpeningCredit] = useState(false)
   const [settlingCredit, setSettlingCredit] = useState(false)
   const [showCreditPanel, setShowCreditPanel] = useState(false)
+  
+  // L2 Account initialization
+  const [needsL2Init, setNeedsL2Init] = useState(false)
 
   useEffect(() => {
     loadMarket()
@@ -96,6 +108,7 @@ export default function MarketDetailPage() {
       // Try to use MarketsSDK if available, otherwise fallback to direct API
       if (marketsReady) {
         const data = await sdkGetMarket(slug)
+        console.log('📊 Market data from SDK:', data)
         if (data) {
           setMarket(data)
         } else {
@@ -103,12 +116,13 @@ export default function MarketDetailPage() {
         }
       } else {
         // Fallback to direct L2 API call
-        const response = await fetch(`http://localhost:1234/markets/${slug}`)
+        const response = await fetch(`http://localhost:1234/market/${slug}`)
         if (!response.ok) {
           throw new Error(`Failed to fetch market: ${response.status}`)
         }
         const data = await response.json()
-        setMarket(data)
+        console.log('📊 Market data from L2:', data)
+        setMarket(data.market || data)
       }
     } catch (error: any) {
       console.error('Failed to load market:', error)
@@ -119,14 +133,9 @@ export default function MarketDetailPage() {
 
   async function loadPosition() {
     try {
-      // Use MarketsSDK if available and not in credit session, otherwise use credit
-      if (marketsReady && !hasActiveCredit) {
-        const pos = await sdkGetPosition(market.id)
-        setPosition(pos)
-      } else {
-        const pos = creditGetPosition(market.id)
-        setPosition(pos)
-      }
+      // Use CreditPredictionSDK for positions
+      const pos = creditGetPosition(market.id)
+      setPosition(pos)
     } catch (error) {
       console.log('No position in this market')
     }
@@ -136,12 +145,8 @@ export default function MarketDetailPage() {
     try {
       const amount = parseFloat(betAmount)
       
-      // Use MarketsSDK if available and user has L2 balance, otherwise use credit
-      if (marketsReady && !hasActiveCredit) {
-        const q = await sdkGetQuote(market.id, selectedOutcome, amount)
-        setQuote(q)
-      } else {
-        // Use credit prediction for quote
+      // Always use CreditPredictionSDK for quotes (it has the L2 endpoints)
+      if (creditConnected) {
         const q = await creditGetQuote(market.id, selectedOutcome, amount)
         setQuote(q)
       }
@@ -193,35 +198,25 @@ export default function MarketDetailPage() {
     try {
       setBetting(true)
       
-      // Use MarketsSDK if available and user has L2 balance, otherwise use credit
-      if (marketsReady && !hasActiveCredit) {
-        const result = await sdkPlaceBet(market.id, selectedOutcome, parseFloat(betAmount))
-        
-        if (result.success) {
-          setBetAmount('')
-          setQuote(null)
-          await loadMarket()
-          await loadPosition()
-          alert(`✅ Bet placed! Got ${result.shares?.toFixed(2) || 'N/A'} shares`)
-        } else {
-          alert('❌ Failed to place bet')
-        }
+      // Always use CreditPredictionSDK (it has the proper L2 endpoints)
+      const result = await creditPlaceBet(market.id, selectedOutcome, parseFloat(betAmount))
+      
+      if (result.success) {
+        setBetAmount('')
+        setQuote(null)
+        await loadMarket()
+        await loadPosition()
+        await refreshBalance()
+        alert(`✅ Bet placed! Got ${result.shares?.toFixed(2) || 'N/A'} shares`)
       } else {
-        // Use credit prediction for betting
-        const result = await creditPlaceBet(market.id, selectedOutcome, parseFloat(betAmount))
-        
-        if (result.success) {
-          setBetAmount('')
-          setQuote(null)
-          await loadMarket()
-          await loadPosition()
-          await refreshBalance()
-          alert(`✅ Bet placed! Got ${result.shares?.toFixed(2) || 'N/A'} shares`)
-        } else {
-          alert('❌ Failed to place bet')
-        }
+        alert('❌ Failed to place bet')
       }
     } catch (error: any) {
+      // Check if account doesn't exist on L2
+      if (error.message && (error.message.includes('Account not found') || error.message.includes('account not found'))) {
+        setNeedsL2Init(true)
+        return
+      }
       alert(`❌ Failed to place bet: ${error.message}`)
     } finally {
       setBetting(false)
@@ -230,22 +225,13 @@ export default function MarketDetailPage() {
 
   async function handleSellShares(outcome: number, shares: number) {
     try {
-      // Use MarketsSDK if available and not in credit session, otherwise use credit
-      if (marketsReady && !hasActiveCredit) {
-        const result = await sdkSellShares(market.id, outcome, shares)
-        if (result.success) {
-          await loadMarket()
-          await loadPosition()
-          alert('✅ Shares sold successfully!')
-        }
-      } else {
-        const result = await sellPosition(market.id, outcome, shares)
-        if (result.success) {
-          await loadMarket()
-          await loadPosition()
-          await refreshBalance()
-          alert('✅ Shares sold successfully!')
-        }
+      // Always use CreditPredictionSDK for selling
+      const result = await sellPosition(market.id, outcome, shares)
+      if (result.success) {
+        await loadMarket()
+        await loadPosition()
+        await refreshBalance()
+        alert('✅ Shares sold successfully!')
       }
     } catch (error: any) {
       alert(`❌ Failed to sell shares: ${error.message}`)
@@ -291,8 +277,16 @@ export default function MarketDetailPage() {
     )
   }
 
-  const prices = market.cpmm_pool?.current_prices || []
-  const outcomes = market.options || market.outcomes || []
+  const prices = market.prices || market.cpmm_pool?.current_prices || [0.5, 0.5]
+  const outcomes = market.options || market.outcomes || ['Yes', 'No']
+
+  console.log('🎯 Market display:', { 
+    id: market.id, 
+    status: market.market_status || market.status,
+    prices, 
+    outcomes,
+    volume: market.total_volume 
+  })
 
   return (
     <div className="min-h-screen bg-dark">
@@ -382,6 +376,48 @@ export default function MarketDetailPage() {
                 </motion.div>
               )
             })}
+
+            {/* Prop Bets Section */}
+            {market.props && market.props.length > 0 && (
+              <>
+                <h2 className="text-2xl font-bold text-white mt-8 flex items-center gap-2">
+                  🎯 Prop Bets 
+                  <span className="text-sm font-normal text-gray-400">({market.props.length})</span>
+                </h2>
+                {market.props.map((prop: any, idx: number) => (
+                  <motion.div 
+                    key={prop.id || idx}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.1 }}
+                    className="prism-card rounded-xl p-5 bg-gradient-to-br from-indigo-900/20 to-purple-900/20 border border-indigo-500/20 hover:border-indigo-500/40 transition-all cursor-pointer"
+                    onClick={() => window.location.href = `/markets/${prop.market_id || prop.id}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-bold text-white mb-1">{prop.title}</h3>
+                        <p className="text-gray-400 text-sm mb-3">{prop.description}</p>
+                        <div className="flex items-center gap-4 text-xs">
+                          <span className="text-indigo-400">
+                            Volume: {parseInt(prop.total_volume || 0).toLocaleString()} BB
+                          </span>
+                          <span className="text-purple-400">
+                            {(prop.prices || []).map((p: number, i: number) => 
+                              `${prop.outcomes?.[i] || `Option ${i+1}`}: ${(p * 100).toFixed(0)}%`
+                            ).join(' • ')}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-indigo-400 ml-4">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </>
+            )}
           </div>
           <div>
             <div className="sticky top-24 space-y-4">
@@ -448,8 +484,13 @@ export default function MarketDetailPage() {
 
               {/* Main Betting/Liquidity Card */}
               <div className="prism-card rounded-xl p-6">
-                {/* Show liquidity panel for zero-liquidity markets */}
-                {(market.cpmm_pool?.total_liquidity || 0) === 0 ? (
+                {/* Show betting interface for active markets, liquidity panel for pending */}
+                {(() => {
+                  const status = market.market_status || market.status || 'pending'
+                  const isActive = status === 'active'
+                  console.log('💧 Market status check:', { status, isActive, marketId: market.id })
+                  return !isActive  // Show liquidity panel only if NOT active
+                })() ? (
                   <>
                     <h3 className="text-xl font-bold text-white mb-4">🚀 Initialize Market</h3>
                     <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
@@ -547,6 +588,50 @@ export default function MarketDetailPage() {
 
                     {!showLiquidityPanel ? (
                       <>
+                        {/* Settlement Betting Mode Toggle */}
+                        {settlementConnected && healthStatus.l1Healthy && (
+                          <div className="mb-4 flex items-center justify-between p-3 bg-dark-300 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">🔒 L1-Backed Betting</span>
+                              {useSettlementBetting && (
+                                <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded">Active</span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => setUseSettlementBetting(!useSettlementBetting)}
+                              className={`w-12 h-6 rounded-full transition-colors ${
+                                useSettlementBetting ? 'bg-green-500' : 'bg-gray-600'
+                              }`}
+                            >
+                              <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                                useSettlementBetting ? 'translate-x-6' : 'translate-x-0.5'
+                              }`} />
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Use Settlement Betting Interface when enabled */}
+                        {useSettlementBetting && settlementConnected ? (
+                          <SettlementBettingInterface 
+                            market={{
+                              id: market.id,
+                              title: market.title,
+                              description: market.description,
+                              outcomes: outcomes,
+                              prices: prices,
+                              status: (market.market_status || market.status || 'active') as any,
+                              winning_outcome: market.winning_outcome,
+                              liquidity: market.cpmm_pool?.total_liquidity,
+                              volume: market.total_volume
+                            }}
+                            onBetPlaced={async () => {
+                              await loadMarket()
+                              await loadPosition()
+                              await refreshBalance()
+                            }}
+                          />
+                        ) : (
+                          <>
                         {/* Betting Panel */}
                         <h3 className="text-xl font-bold text-white mb-4">Place Bet</h3>
                         
@@ -585,6 +670,8 @@ export default function MarketDetailPage() {
                               </p>
                             )}
                           </div>
+                        ) : needsL2Init ? (
+                          <L2AccountInitPrompt />
                         ) : (
                           <>
                             <div className="mb-4">
@@ -653,6 +740,8 @@ export default function MarketDetailPage() {
                               Using wallet: {activeWallet === 'alice' ? '🟣 Alice' : activeWallet === 'bob' ? '🔵 Bob' : '👤 Your Wallet'}
                             </div>
                           </>
+                        )}
+                      </>
                         )}
                       </>
                     ) : (
@@ -749,6 +838,54 @@ export default function MarketDetailPage() {
                   </>
                 )}
               </div>
+
+              {/* Create Prop Bet Card */}
+              {isAuthenticated && isConnected && (market.market_status === 'active' || market.status === 'active') && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="prism-card rounded-xl p-6 mt-4 bg-gradient-to-br from-indigo-900/30 to-purple-900/30 border border-indigo-500/30"
+                >
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="text-3xl">🎯</span>
+                    <div>
+                      <h3 className="text-lg font-bold text-white">Create Prop Bet</h3>
+                      <p className="text-gray-400 text-xs">Create a side bet on this market</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3 mb-4">
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <span className="text-green-400">✓</span>
+                      <span>Requires 100 BB minimum liquidity</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <span className="text-green-400">✓</span>
+                      <span>Earn fees from all trades on your prop</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <span className="text-green-400">✓</span>
+                      <span>Community resolves via oracle vote</span>
+                    </div>
+                  </div>
+
+                  {market.props && market.props.length > 0 && (
+                    <div className="mb-4 p-3 bg-indigo-500/10 rounded-lg">
+                      <p className="text-indigo-300 text-sm">
+                        <span className="font-bold">{market.props.length}</span> prop bets already exist on this market
+                      </p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => alert('🎯 Prop bet creation coming soon! Use the SDK directly:\n\nsdk.createProp(marketId, { title, outcomes, initialLiquidity })')}
+                    className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/50 text-indigo-300 font-semibold hover:from-indigo-500/30 hover:to-purple-500/30 transition-all"
+                  >
+                    + Create New Prop Bet
+                  </button>
+                </motion.div>
+              )}
             </div>
           </div>
         </div>

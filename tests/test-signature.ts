@@ -4,16 +4,16 @@ import {
   createKeyPair,
   mnemonicToSeed,
   generateMnemonic,
-  deriveL1Address,
   bytesToHex
 } from '../lib/blackbook-wallet'
+import { deriveL1Address } from '../lib/address-utils'
 
 async function test() {
   // Generate a test wallet
   const mnemonic = await generateMnemonic()
   const seed = await mnemonicToSeed(mnemonic)
-  const keyPair = createKeyPair(seed)
-  const address = await deriveL1Address(keyPair.publicKey)
+  const keyPair = await createKeyPair(seed)
+  const address = deriveL1Address(keyPair.publicKey)
   
   console.log('Test Wallet:')
   console.log('- Address:', address)

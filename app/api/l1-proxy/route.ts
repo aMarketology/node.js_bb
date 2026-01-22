@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
 
     const url = `${L1_API_URL}${endpoint}`
     console.log('🔄 Proxying L1 POST request:', url)
+    console.log('📦 Request data:', JSON.stringify(data, null, 2))
 
     const response = await fetch(url, {
       method,
@@ -54,12 +55,34 @@ export async function POST(request: NextRequest) {
       body: data ? JSON.stringify(data) : undefined,
     })
 
-    const responseData = await response.json()
-    return NextResponse.json(responseData)
+    console.log('📡 L1 response status:', response.status)
+    
+    // Check if response is ok
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('❌ L1 API error:', errorText)
+      return NextResponse.json(
+        { error: 'L1 API returned error', status: response.status, details: errorText },
+        { status: response.status }
+      )
+    }
+
+    // Try to parse as JSON
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      const responseData = await response.json()
+      console.log('✅ L1 response:', responseData)
+      return NextResponse.json(responseData)
+    } else {
+      const responseText = await response.text()
+      console.log('✅ L1 response (text):', responseText)
+      return NextResponse.json({ success: true, message: responseText })
+    }
   } catch (error: any) {
-    console.error('L1 proxy POST error:', error)
+    console.error('❌ L1 proxy POST error:', error)
+    console.error('Error stack:', error.stack)
     return NextResponse.json(
-      { error: 'Failed to post to L1', details: error.message },
+      { error: 'Failed to post to L1', details: error.message, stack: error.stack },
       { status: 500 }
     )
   }

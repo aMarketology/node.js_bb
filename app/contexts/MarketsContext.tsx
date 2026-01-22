@@ -41,40 +41,39 @@ export function MarketsProvider({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false)
 
   useEffect(() => {
-    if (isAuthenticated && activeWalletData?.publicKey && activeWalletData?.privateKey) {
-      console.log('🎯 Initializing MarketsSDK...')
-      
-      const nacl = require('tweetnacl')
-      
-      // Convert hex strings to Uint8Array
-      const publicKeyBytes = Buffer.from(activeWalletData.publicKey, 'hex')
-      const privateKeyBytes = Buffer.from(activeWalletData.privateKey, 'hex')
-      
-      // Create signer function that signs messages
-      const signer = async (message: string): Promise<string> => {
-        // Ed25519 secret key is 64 bytes: 32-byte private key + 32-byte public key
-        const secretKey = new Uint8Array(64)
-        secretKey.set(privateKeyBytes, 0)
-        secretKey.set(publicKeyBytes, 32)
+    const initializeSDK = async () => {
+      if (isAuthenticated && activeWalletData?.publicKey && activeWalletData?.privateKey) {
+        console.log('🎯 Initializing MarketsSDK...')
         
-        const messageBytes = new TextEncoder().encode(message)
-        const signature = nacl.sign.detached(messageBytes, secretKey)
-        return Buffer.from(signature).toString('hex')
+        // Import @noble/ed25519 dynamically
+        const ed = await import('@noble/ed25519')
+        
+        // Convert hex strings to Uint8Array
+        const privateKeyBytes = Buffer.from(activeWalletData.privateKey, 'hex')
+        
+        // Create signer function using @noble/ed25519
+        const signer = async (message: string): Promise<string> => {
+          const messageBytes = new TextEncoder().encode(message)
+          const signature = await ed.signAsync(messageBytes, privateKeyBytes)
+          return Buffer.from(signature).toString('hex')
+        }
+
+        const marketsSDK = new MarketsSDK({
+          l2Url: process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234',
+          address: activeWalletData.l2Address || activeWalletData.l1Address,
+          signer
+        })
+
+        setSdk(marketsSDK)
+        setIsReady(true)
+        console.log('✅ MarketsSDK initialized for', activeWalletData.l2Address || activeWalletData.l1Address)
+      } else {
+        setSdk(null)
+        setIsReady(false)
       }
-
-      const marketsSDK = new MarketsSDK({
-        l2Url: process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234',
-        address: activeWalletData.l1Address,
-        signer
-      })
-
-      setSdk(marketsSDK)
-      setIsReady(true)
-      console.log('✅ MarketsSDK initialized for', activeWalletData.l1Address)
-    } else {
-      setSdk(null)
-      setIsReady(false)
     }
+    
+    initializeSDK()
   }, [isAuthenticated, activeWalletData])
 
   // Market Loading Methods

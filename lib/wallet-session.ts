@@ -542,14 +542,5 @@ export async function mnemonicToSeed(mnemonic: string, passphrase: string = ''):
   return new Uint8Array(seed).slice(0, 32);
 }
 
-/**
- * Derive L1 address from public key
- * Address = L1_ + SHA256(pubkey)[0..40].toUpperCase()
- */
-export async function deriveL1Address(publicKey: Uint8Array): Promise<string> {
-  const hash = await sha256(publicKey);
-  return 'L1_' + hash.slice(0, 40).toUpperCase();
-}
-
 // Export wordlist for UI display
 export { BIP39_WORDLIST };

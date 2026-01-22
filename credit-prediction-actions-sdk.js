@@ -5,18 +5,47 @@
  * 
  * Frontend SDK for BlackBook L2 - Credit Line Trading & Prediction Markets
  * 
+ * SETTLEMENT ROADMAP (January 2026):
+ * ══════════════════════════════════════════════════════════════════════════
+ * 
+ * PHASE 1: CLEARINGHOUSE DEPOSITS (✅ IMPLEMENTED)
+ *   Endpoint: POST /clearinghouse/deposit
+ *   Requirements: Dealer signature authentication
+ *   
+ * PHASE 2: CPMM TRADING (✅ IMPLEMENTED)
+ *   Endpoints: GET /quote, POST /cpmm/buy, POST /cpmm/sell
+ *   Features: Slippage protection, dynamic pricing
+ *   
+ * PHASE 3: ORACLE RESOLUTION (✅ IMPLEMENTED)  
+ *   Endpoint: POST /resolve
+ *   Requirements: Dealer signature + oracle authentication
+ *   Auto-features: Payout calculation, balance distribution
+ *   
+ * PHASE 4: CLEARINGHOUSE WITHDRAWALS (✅ IMPLEMENTED)
+ *   Flow: POST /clearinghouse/withdraw → /clearinghouse/withdraw/complete
+ *   Requirements: Dual dealer signatures for security
+ * 
+ * ⚠️  CRITICAL: Dealer operations require Ed25519 signatures with replay protection
+ * 
  * Usage:
  *   const sdk = new CreditPredictionSDK({
  *     l2Url: 'http://localhost:1234',
  *     supabaseUrl: 'https://xxx.supabase.co',
  *     supabaseKey: 'your-anon-key',
- *     address: 'user-wallet-address',
- *     signer: async (msg) => wallet.sign(msg)  // from your L1 wallet
+ *     address: 'L2_YOUR_ADDRESS',
+ *     publicKey: 'your-ed25519-public-key-hex',
+ *     signer: async (msg) => wallet.sign(msg)
  *   });
  * 
+ *   // User flow
  *   await sdk.openCredit(1000);
  *   await sdk.bet('market-id', 0, 100);
  *   await sdk.settleCredit();
+ * 
+ *   // Dealer flow (requires dealer private key)
+ *   const dealerSdk = new CreditPredictionSDK({ ...config, isDealerMode: true });
+ *   await dealerSdk.confirmDeposit({ ... });
+ *   await dealerSdk.resolveMarket('market-id', 0);
  * 
  * ═══════════════════════════════════════════════════════════════════════════
  */
@@ -30,9 +59,14 @@ import { createClient } from '@supabase/supabase-js';
 export class CreditPredictionSDK {
   constructor(config) {
     this.l2Url = (config.l2Url || 'http://localhost:1234').replace(/\/$/, '');
+    this.l1Url = (config.l1Url || 'http://localhost:8080').replace(/\/$/, '');
     this.address = config.address;
+    this.publicKey = config.publicKey;  // Ed25519 public key for signing
     this.signer = config.signer;
     this.listeners = [];
+    
+    // Dealer mode - enables clearinghouse confirmations and resolution
+    this.isDealerMode = config.isDealerMode || false;
     
     // Supabase for markets
     if (config.supabaseUrl && config.supabaseKey) {
@@ -41,11 +75,21 @@ export class CreditPredictionSDK {
     
     // Active credit session tracking
     this.activeSession = null;
+    
+    // Nonce counter for replay protection
+    this._nonceCounter = Date.now();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // SIGNING
+  // SIGNING & REPLAY PROTECTION
   // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Generate a unique nonce for replay protection
+   */
+  generateNonce() {
+    return `${Date.now()}_${++this._nonceCounter}_${Math.random().toString(36).slice(2, 10)}`;
+  }
 
   async signTransaction(tx) {
     const message = JSON.stringify(tx);
@@ -53,8 +97,174 @@ export class CreditPredictionSDK {
     return { tx, signature, signer: this.address };
   }
 
+  /**
+   * Sign a message with dealer authentication format (for protected endpoints)
+   * Required for: /clearinghouse/deposit, /clearinghouse/withdraw/complete, /resolve
+   * @param {object} payload - The payload to sign
+   * @returns {object} Signed payload with dealer auth fields
+   */
+  async signDealerMessage(payload) {
+    if (!this.publicKey) {
+      throw new Error('publicKey required for dealer operations');
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = this.generateNonce();
+    
+    const message = JSON.stringify({
+      action: payload.action || 'dealer_operation',
+      timestamp,
+      nonce,
+      payload
+    });
+    
+    const signature = await this.signer(message);
+    
+    return {
+      ...payload,
+      dealer_public_key: this.publicKey,
+      dealer_signature: signature,
+      timestamp,
+      nonce
+    };
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
-  // BALANCE
+  // BRIDGE: L1 ($BC) → L2 ($BB)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get L1 ($BC) balance for connected wallet
+   * @returns {Promise<{available: number, locked: number}>}
+   */
+  async getL1Balance() {
+    // Convert L2 address to L1 format if needed
+    const l1Address = this.address.startsWith('L2_') 
+      ? this.address.replace('L2_', 'L1_') 
+      : this.address.startsWith('L1_') 
+        ? this.address 
+        : `L1_${this.address}`;
+    
+    try {
+      const res = await this.l1Get(`/balance/${l1Address}`);
+      return {
+        available: res.available ?? res.balance ?? 0,
+        locked: res.locked ?? 0
+      };
+    } catch (error) {
+      throw new Error(`Failed to get L1 balance: ${error.message}. Is L1 server running?`);
+    }
+  }
+
+  /**
+   * Lock $BC on L1 (Step 1 of bridge)
+   * @param {number} amount - Amount of $BC to lock
+   * @returns {Promise<{lockId: string, l1TxHash: string, amount: number}>}
+   */
+  async bridgeLockOnL1(amount) {
+    if (!this.publicKey) {
+      throw new Error('publicKey required in SDK config for L1 bridge operations');
+    }
+
+    const nonce = crypto.randomUUID ? crypto.randomUUID() : `nonce_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // L1 payload structure
+    const payload = {
+      amount: amount,
+      target_layer: "L2"
+    };
+    const payloadStr = JSON.stringify(payload);
+
+    // Sign for L1 (chain_id=1 for L1)
+    const messageToSign = `1${payloadStr}\n${timestamp}\n${nonce}`;
+    const signature = await this.signer(messageToSign);
+
+    const res = await this.l1Post('/bridge/initiate', {
+      payload: payloadStr,
+      public_key: this.publicKey,
+      signature: signature,
+      nonce: nonce,
+      timestamp: timestamp,
+      chain_id: 1
+    });
+
+    if (res.error) {
+      throw new Error(`L1 bridge lock failed: ${res.error}`);
+    }
+
+    return {
+      lockId: res.lock_id || res.lockId,
+      l1TxHash: res.tx_hash || res.l1_tx_hash || `tx_${res.lock_id}`,
+      amount: res.amount || amount
+    };
+  }
+
+  /**
+   * Claim $BB on L2 after locking on L1 (Step 2 of bridge)
+   * @param {string} lockId - Lock ID from L1 bridge/initiate
+   * @param {number} amount - Amount locked on L1
+   * @param {string} l1TxHash - L1 transaction hash
+   * @returns {Promise<{success: boolean, newBalance: number}>}
+   */
+  async bridgeClaimOnL2(lockId, amount, l1TxHash) {
+    if (!this.publicKey) {
+      throw new Error('publicKey required in SDK config for L2 bridge claims');
+    }
+
+    // Sign for L2 claim
+    const claimPayload = { lock_id: lockId, amount: amount, l1_tx_hash: l1TxHash };
+    const signature = await this.signer(JSON.stringify(claimPayload));
+
+    const res = await this.l2Post('/bridge/credit', {
+      lock_id: lockId,
+      address: this.address,
+      amount: amount,
+      l1_tx_hash: l1TxHash,
+      signature: signature,
+      l1_pubkey: this.publicKey
+    });
+
+    if (res.error) {
+      throw new Error(`L2 bridge claim failed: ${res.error}`);
+    }
+
+    this.emit({ type: 'bridge_completed', lockId, amount });
+
+    return {
+      success: true,
+      newBalance: res.new_balance || res.balance || amount
+    };
+  }
+
+  /**
+   * Full bridge flow: Lock $BC on L1 → Credit $BB on L2
+   * @param {number} amount - Amount to bridge
+   * @returns {Promise<{success: boolean, lockId: string, newL2Balance: number}>}
+   */
+  async bridge(amount) {
+    // Step 1: Check L1 balance
+    const l1Balance = await this.getL1Balance();
+    if (l1Balance.available < amount) {
+      throw new Error(`Insufficient L1 balance: ${l1Balance.available} < ${amount}. Deposit $BC on L1 first.`);
+    }
+
+    // Step 2: Lock on L1
+    this.emit({ type: 'bridge_started', amount });
+    const lock = await this.bridgeLockOnL1(amount);
+
+    // Step 3: Claim on L2
+    const claim = await this.bridgeClaimOnL2(lock.lockId, amount, lock.l1TxHash);
+
+    return {
+      success: true,
+      lockId: lock.lockId,
+      newL2Balance: claim.newBalance
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BALANCE & USER STATUS
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
@@ -70,10 +280,33 @@ export class CreditPredictionSDK {
   }
 
   /**
+   * Get unified L1/L2 balance view
+   */
+  async getUnifiedBalance() {
+    const res = await this.l2Get(`/unified/balance/${this.address}`);
+    return {
+      l1Available: res.l1_available || 0,
+      l1Locked: res.l1_locked || 0,
+      l2Available: res.l2_available || 0,
+      l2Locked: res.l2_locked || 0,
+      totalAvailable: res.total_available || 0,
+      hasActiveCredit: res.has_active_credit || false
+    };
+  }
+
+  /**
+   * Get comprehensive user status (balance + positions + bets + credit)
+   */
+  async getUserStatus() {
+    const res = await this.l2Get(`/user/status/${this.address}`);
+    return res;
+  }
+
+  /**
    * Get all positions for connected wallet
    */
   async getPositions() {
-    const res = await this.l2Get(`/positions/${this.address}`);
+    const res = await this.l2Get(`/unified/positions/${this.address}`);
     return res.positions || [];
   }
 
@@ -90,6 +323,141 @@ export class CreditPredictionSDK {
     const totalPnl = positions.reduce((sum, p) => sum + (p.unrealizedPnl || 0), 0);
     
     return { balance, positions, totalValue, totalPnl };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CLEARINGHOUSE (Dealer-Controlled Deposits & Withdrawals)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Confirm a deposit (DEALER ONLY - requires dealer signature)
+   * Called after L1 lock is verified
+   * @param {object} params - { userAddress, amount, l1TxHash, lockId }
+   */
+  async confirmDeposit(params) {
+    if (!this.isDealerMode) {
+      throw new Error('confirmDeposit requires dealer mode (isDealerMode: true)');
+    }
+
+    const payload = {
+      action: 'deposit_confirm',
+      user_address: params.userAddress,
+      amount: params.amount,
+      l1_tx_hash: params.l1TxHash,
+      lock_id: params.lockId
+    };
+
+    const signedPayload = await this.signDealerMessage(payload);
+    const res = await this.l2Post('/clearinghouse/deposit', signedPayload);
+
+    if (res.success) {
+      this.emit({ type: 'deposit_confirmed', userAddress: params.userAddress, amount: params.amount });
+    }
+
+    return {
+      success: res.success !== false,
+      newBalance: res.new_balance,
+      message: res.message || 'Deposit confirmed'
+    };
+  }
+
+  /**
+   * Request a withdrawal (user-initiated)
+   * @param {number} amount - Amount to withdraw
+   */
+  async requestWithdrawal(amount) {
+    const tx = {
+      action: 'withdraw_request',
+      wallet: this.address,
+      amount,
+      timestamp: Date.now()
+    };
+
+    const signed = await this.signTransaction(tx);
+    const res = await this.l2Post('/clearinghouse/withdraw', {
+      ...signed,
+      address: this.address,
+      amount
+    });
+
+    if (res.success) {
+      this.emit({ type: 'withdrawal_requested', amount, requestId: res.request_id });
+    }
+
+    return {
+      success: res.success !== false,
+      requestId: res.request_id,
+      status: res.status || 'pending',
+      message: res.message || 'Withdrawal requested'
+    };
+  }
+
+  /**
+   * Complete a withdrawal (DEALER ONLY - requires dealer signature)
+   * @param {object} params - { requestId, userAddress, amount, l1TxHash }
+   */
+  async completeWithdrawal(params) {
+    if (!this.isDealerMode) {
+      throw new Error('completeWithdrawal requires dealer mode (isDealerMode: true)');
+    }
+
+    const payload = {
+      action: 'withdraw_complete',
+      request_id: params.requestId,
+      user_address: params.userAddress,
+      amount: params.amount,
+      l1_tx_hash: params.l1TxHash
+    };
+
+    const signedPayload = await this.signDealerMessage(payload);
+    const res = await this.l2Post('/clearinghouse/withdraw/complete', signedPayload);
+
+    if (res.success) {
+      this.emit({ type: 'withdrawal_completed', userAddress: params.userAddress, amount: params.amount });
+    }
+
+    return {
+      success: res.success !== false,
+      message: res.message || 'Withdrawal completed'
+    };
+  }
+
+  /**
+   * Get pending withdrawals (for dealer dashboard)
+   */
+  async getPendingWithdrawals() {
+    const res = await this.l2Get('/clearinghouse/pending');
+    return res.pending || [];
+  }
+
+  /**
+   * Get clearinghouse statistics
+   */
+  async getClearinghouseStats() {
+    const res = await this.l2Get('/clearinghouse/stats');
+    return {
+      totalDeposits: res.total_deposits || 0,
+      totalWithdrawals: res.total_withdrawals || 0,
+      pendingWithdrawals: res.pending_withdrawals || 0,
+      netBalance: res.net_balance || 0,
+      userCount: res.user_count || 0
+    };
+  }
+
+  /**
+   * Get user's deposit history
+   */
+  async getMyDeposits() {
+    const res = await this.l2Get(`/clearinghouse/deposits/${this.address}`);
+    return res.deposits || [];
+  }
+
+  /**
+   * Get user's withdrawal history
+   */
+  async getMyWithdrawals() {
+    const res = await this.l2Get(`/clearinghouse/withdrawals/${this.address}`);
+    return res.withdrawals || [];
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -420,6 +788,157 @@ export class CreditPredictionSDK {
     return this.getMarket(marketId);
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MARKET LIFECYCLE (Draft → Pending → Active → Frozen → Resolved)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get draft markets awaiting dealer approval
+   */
+  async getDraftMarkets() {
+    const res = await this.l2Get('/markets/drafts');
+    return res.markets || [];
+  }
+
+  /**
+   * Get full lifecycle status for a market
+   * @param {string} marketId - Market ID
+   * @returns {Promise<{current_status, is_draft, is_active, is_frozen, is_resolved, transitions}>}
+   */
+  async getMarketLifecycle(marketId) {
+    const res = await this.l2Get(`/market/${marketId}/lifecycle`);
+    return res;
+  }
+
+  /**
+   * Create a DRAFT market (dealer must approve before trading)
+   * @param {object} marketData - { id, title, description, outcomes, closesAt, resolutionCriteria, category, sourceUrl }
+   */
+  async createDraft(marketData) {
+    const res = await this.l2Post('/market/draft', {
+      id: marketData.id,
+      title: marketData.title,
+      description: marketData.description || '',
+      outcomes: marketData.outcomes || ['Yes', 'No'],
+      closes_at: typeof marketData.closesAt === 'number' 
+        ? marketData.closesAt 
+        : Math.floor(new Date(marketData.closesAt).getTime() / 1000),
+      resolution_criteria: marketData.resolutionCriteria,
+      category: marketData.category || 'general',
+      source_url: marketData.sourceUrl || '',
+    });
+
+    if (res.success) {
+      this.emit({ type: 'draft_created', marketId: res.market_id });
+    }
+
+    return {
+      success: res.success !== false,
+      marketId: res.market_id,
+      status: res.status || 'draft',
+      message: res.message || 'Draft created'
+    };
+  }
+
+  /**
+   * Approve a draft market (DEALER ONLY - requires dealer signature)
+   * @param {string} marketId - Market ID to approve
+   * @param {number} initialLiquidity - Amount of $BB to add as liquidity
+   */
+  async approveMarket(marketId, initialLiquidity) {
+    if (!this.isDealerMode) {
+      throw new Error('approveMarket requires dealer mode (isDealerMode: true)');
+    }
+
+    const payload = {
+      action: 'market_approve',
+      market_id: marketId,
+      initial_liquidity: initialLiquidity
+    };
+
+    const signedPayload = await this.signDealerMessage(payload);
+    const res = await this.l2Post('/market/approve', signedPayload);
+
+    if (res.success) {
+      this.emit({ type: 'market_approved', marketId, liquidity: initialLiquidity });
+    }
+
+    return {
+      success: res.success !== false,
+      marketId: res.market_id,
+      status: res.status || 'active',
+      liquidity: res.liquidity,
+      message: res.message || 'Market approved'
+    };
+  }
+
+  /**
+   * Reject a draft market (DEALER ONLY - requires dealer signature)
+   * @param {string} marketId - Market ID to reject
+   * @param {string} reason - Reason for rejection
+   */
+  async rejectMarket(marketId, reason) {
+    if (!this.isDealerMode) {
+      throw new Error('rejectMarket requires dealer mode (isDealerMode: true)');
+    }
+
+    const payload = {
+      action: 'market_reject',
+      market_id: marketId,
+      reason: reason
+    };
+
+    const signedPayload = await this.signDealerMessage(payload);
+    const res = await this.l2Post('/market/reject', signedPayload);
+
+    if (res.success) {
+      this.emit({ type: 'market_rejected', marketId, reason });
+    }
+
+    return {
+      success: res.success !== false,
+      marketId: res.market_id,
+      status: 'rejected',
+      reason: res.reason || reason,
+      message: res.message || 'Market rejected'
+    };
+  }
+
+  /**
+   * Resolve a market (DEALER/ORACLE ONLY - requires dealer signature)
+   * Automatically calculates and distributes payouts to winners
+   * @param {string} marketId - Market ID to resolve
+   * @param {number} winningOutcome - Index of winning outcome (0, 1, etc.)
+   */
+  async resolveMarket(marketId, winningOutcome) {
+    if (!this.isDealerMode) {
+      throw new Error('resolveMarket requires dealer mode (isDealerMode: true)');
+    }
+
+    const payload = {
+      action: 'resolve',
+      market_id: marketId,
+      winning_outcome: winningOutcome
+    };
+
+    const signedPayload = await this.signDealerMessage(payload);
+    const res = await this.l2Post('/resolve', signedPayload);
+
+    if (res.success) {
+      this.emit({ type: 'market_resolved', marketId, winningOutcome, payouts: res.payouts });
+    }
+
+    return {
+      success: res.success !== false,
+      marketId: res.market_id || marketId,
+      winningOutcome: res.winning_outcome,
+      totalPool: res.total_pool,
+      fee: res.fee,
+      payouts: res.payouts || [],
+      message: res.message || 'Market resolved'
+    };
+  }
+
   /**
    * Create a prop bet on a market (L2)
    * Requires 100 $BC minimum liquidity
@@ -588,7 +1107,7 @@ export class CreditPredictionSDK {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // HEALTH
+  // HEALTH & STATE
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
@@ -597,15 +1116,68 @@ export class CreditPredictionSDK {
   async health() {
     try {
       const res = await this.l2Get('/health');
-      return { healthy: true, blockHeight: res.block_height };
+      return { 
+        healthy: true, 
+        blockHeight: res.block_height,
+        stateRoot: res.state_root,
+        marketCount: res.market_count,
+        userCount: res.user_count
+      };
     } catch {
       return { healthy: false };
     }
   }
 
+  /**
+   * Get current state root (for L1 verification)
+   */
+  async getStateRoot() {
+    const res = await this.l2Get('/state_root');
+    return {
+      stateRoot: res.state_root,
+      blockHeight: res.block_height || res.tx_count,
+      timestamp: res.timestamp
+    };
+  }
+
+  /**
+   * Get reserve proof for a user's balance
+   * @param {string} address - User address to prove
+   */
+  async getReserveProof(address) {
+    const res = await this.l2Post('/clearinghouse/reserves', {
+      address: address || this.address
+    });
+    return {
+      balance: res.balance,
+      proof: res.proof,
+      stateRoot: res.state_root,
+      verified: res.verified
+    };
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // HTTP HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
+
+  async l1Get(path) {
+    const res = await fetch(`${this.l1Url}${path}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) throw new Error(`L1 GET failed: ${await res.text()}`);
+    return res.json();
+  }
+
+  async l1Post(path, body) {
+    const res = await fetch(`${this.l1Url}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`L1 POST failed: ${await res.text()}`);
+    return res.json();
+  }
 
   async l2Get(path) {
     const res = await fetch(`${this.l2Url}${path}`, {
@@ -631,8 +1203,34 @@ export class CreditPredictionSDK {
 // FACTORY & DEFAULT EXPORT
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Create a user SDK instance
+ */
 export function createCreditPredictionSDK(config) {
   return new CreditPredictionSDK(config);
 }
+
+/**
+ * Create a dealer SDK instance (for clearinghouse operations)
+ * Requires dealer private key for signing
+ * 
+ * @param {object} config - SDK configuration
+ * @param {string} config.l2Url - L2 server URL
+ * @param {string} config.publicKey - Dealer Ed25519 public key (hex)
+ * @param {function} config.signer - Signing function
+ */
+export function createDealerSDK(config) {
+  return new CreditPredictionSDK({
+    ...config,
+    isDealerMode: true,
+    address: config.address || `L2_DEALER` // Dealer doesn't need user address
+  });
+}
+
+/**
+ * Dealer address constant (from .env)
+ */
+export const DEALER_ADDRESS = 'L2_A75E13F6DEED980C85ADF2D011E72B2D2768CE8D';
+export const ORACLE_ADDRESS = DEALER_ADDRESS; // Same entity
 
 export default CreditPredictionSDK;

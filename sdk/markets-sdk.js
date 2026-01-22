@@ -132,6 +132,13 @@ export class MarketsSDK {
   }
 
   /**
+   * Get all markets - alias for getAll() (test compatibility)
+   */
+  async getMarkets() {
+    return this.getAll();
+  }
+
+  /**
    * Get markets by single status
    * @param {string} status - 'pending', 'active', 'frozen', 'resolved'
    */
@@ -349,6 +356,41 @@ export class MarketsSDK {
     };
   }
 
+  /**
+   * Withdraw funds from L2 to L1
+   * @param {number} amount - Amount to withdraw
+   * @param {string} destinationAddress - L1 destination address (optional, defaults to connected wallet)
+   */
+  async withdraw(amount, destinationAddress = null) {
+    if (!this.address || !this.signer) {
+      throw new Error('Wallet not connected');
+    }
+
+    const tx = {
+      address: this.address,
+      amount,
+      destination: destinationAddress || this.address,
+      timestamp: Date.now()
+    };
+    
+    // Note: The server expects `address`, `amount`, `destination` in the body
+    // and typically a signature header or wrapper. 
+    // Based on other methods, we might need to wrap it.
+    // BUT looking at `layer_2/ledger_v2.rs`:
+    // struct WithdrawReq { address, amount, destination }
+    // There is no explicit signature check in the `WithdrawReq` struct itself, 
+    // but usually these endpoints require auth.
+    // However, the `withdraw` handler in `ledger_v2.rs` takes `Json(req): Json<WithdrawReq>`.
+    // It doesn't seem to verify signature in the handler signature?
+    // Let's look at `withdraw` function in `ledger_v2.rs` again.
+    // `async fn withdraw(State(state): State<AppState>, Json(req): Json<WithdrawReq>)`
+    // It calls `l.withdraw`. `Ledger::withdraw` likely checks balance.
+    // IT DOES NOT CHECK SIGNATURE. This is a security flaw but matching the implementation.
+    
+    const res = await this.l2Post('/withdraw', tx);
+    return res;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // USER POSITIONS
   // ═══════════════════════════════════════════════════════════════════════════
@@ -378,6 +420,46 @@ export class MarketsSDK {
     
     const res = await this.l2Get(`/positions/${this.address}`);
     return res.positions || [];
+  }
+
+  /**
+   * Get all user positions - alias for getAllPositions() (test compatibility)
+   */
+  async getPositions(address = null) {
+    const userAddress = address || this.address;
+    if (!userAddress) return [];
+    
+    const res = await this.l2Get(`/positions/${userAddress}`);
+    return res.positions || [];
+  }
+
+  /**
+   * Get claimable winnings for resolved markets
+   */
+  async getClaimableWinnings(address = null) {
+    const userAddress = address || this.address;
+    if (!userAddress) return [];
+    
+    const res = await this.l2Get(`/winnings/${userAddress}`);
+    return res.winnings || [];
+  }
+
+  /**
+   * Claim winnings from a resolved market
+   */
+  async claimWinnings(marketId) {
+    if (!this.address) throw new Error('Address required for claiming winnings');
+    
+    const res = await this.l2Post(`/winnings/${this.address}/claim`, {
+      marketId,
+      timestamp: Math.floor(Date.now() / 1000)
+    });
+    
+    return {
+      success: res.success || false,
+      amount: res.amount || 0,
+      transactionId: res.transactionId || res.txHash
+    };
   }
 
   /**
@@ -582,7 +664,7 @@ console.log(`Sold 50 shares for ${sellResult.received}`);
 // ─────────────────────────────────────────────────────────────────────────────
 
 const balance = await markets.getBalance();
-console.log(`Available: ${balance.available}, Locked: ${balance.locked}`);
+console.log(`Available: ${balance.l2_available}, Locked: ${balance.l2_locked}`);
 
 const position = await markets.getPosition('btc-100k-2026');
 console.log(`Shares: ${position.shares}, P&L: ${position.unrealizedPnl}`);

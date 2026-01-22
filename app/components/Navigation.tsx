@@ -167,6 +167,7 @@ export default function Navigation() {
               {isAuthenticated && (activeWallet === 'alice' || activeWallet === 'bob') && (
                 <NavLink href="/oracle">Oracle</NavLink>
               )}
+              <NavLink href="/ledger">Ledger</NavLink>
               <NavLink href="/#leaderboard">Leaderboard</NavLink>
               {isAuthenticated && <NavLink href="/wallet">Wallet</NavLink>}
               

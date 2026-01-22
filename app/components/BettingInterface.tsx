@@ -71,7 +71,6 @@ export default function BettingInterface({ propBet, onBetPlaced }: BettingInterf
         '',
         vaultData.encrypted_blob,
         vaultData.nonce,
-        '',
         vaultData.vault_salt,
         storedKey
       )

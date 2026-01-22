@@ -1,18 +1,31 @@
 /**
  * BlackBook L1 Wallet SDK - TypeScript Browser Wrapper
  * 
- * Host-Proof Security Model with Fork Architecture V2:
- *   password → forkPassword()
- *   ├─ authKey = SHA256(AUTH_DOMAIN + password + auth_salt)  → sent to server
- *   └─ vaultKey = PBKDF2(VAULT_DOMAIN + password + vault_salt) → NEVER sent
+ * WALLET UNLOCK FLOW:
+ *   STEP 1: password + salt → encryption_key (PBKDF2, 100k iterations)
+ *   STEP 2: encryption_key + vault_blob → seed (AES-256-GCM decrypt)
+ *   STEP 3: seed → keypair (modern Ed25519 with @noble/ed25519)
+ *   VERIFY: derived public_key === stored public_key → wallet unlocked!
+ * 
+ * SECURITY: Private keys are NEVER stored. They are derived on-demand
+ * from the encrypted vault using the encryption key (derived from password).
  */
 
-import * as nacl from 'tweetnacl';
+import { 
+  createKeyPair as createEd25519KeyPair,
+  signMessage as signEd25519Message,
+  bytesToHex as utilBytesToHex,
+  hexToBytes as utilHexToBytes
+} from './signature-utils';
+import { deriveL1Address, deriveL2Address } from './address-utils';
 
-// Domain separation for Fork Architecture
-const AUTH_FORK_DOMAIN = "BLACKBOOK_AUTH_V2";
-const VAULT_FORK_DOMAIN = "BLACKBOOK_VAULT_V2";
+// Domain separation for auth key derivation
+const AUTH_FORK_DOMAIN = "BB_AUTH:";
+const VAULT_FORK_DOMAIN = "BB_VAULT:";
 
+// Chain domain prefixes for signing
+export const L1_DOMAIN_PREFIX = new Uint8Array([0x01]);
+export const L2_DOMAIN_PREFIX = new Uint8Array([0x02]);
 export const CHAIN_ID_L1 = 0x01;
 export const CHAIN_ID_L2 = 0x02;
 
@@ -345,46 +358,71 @@ export async function mnemonicToSeed(mnemonic: string, passphrase: string = ''):
 }
 
 // ═══════════════════════════════════════════════════════════════
-// FORK ARCHITECTURE - Password Splitting
+// PBKDF2 KEY DERIVATION
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Fork password into auth_key and vault_key
- * Uses PBKDF2 for vault key (browser-compatible, production should use Argon2)
+ * Derive encryption key from password and salt using PBKDF2
+ * STEP 1: password + salt → encryption_key
+ * 
+ * @param password - User's plaintext password
+ * @param salt - Salt from user_vaults table (hex string)
+ * @returns 32-byte encryption key for AES-256
  */
-export async function forkPassword(
+export async function deriveEncryptionKey(
   password: string, 
-  authSalt: string, 
-  vaultSalt: string
-): Promise<{ authKey: string; vaultKey: Uint8Array }> {
-  // FORK A: Auth Key (fast SHA256)
-  const authDomain = AUTH_FORK_DOMAIN + authSalt;
-  const authKey = await sha256(authDomain + password);
-  
-  // FORK B: Vault Key (PBKDF2 - high iterations for security)
+  salt: string
+): Promise<Uint8Array> {
   const encoder = new TextEncoder();
+  const passwordBytes = encoder.encode(password);
+  const saltBytes = hexToBytes(salt);
+  
+  // Import password as key material
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(VAULT_FORK_DOMAIN + vaultSalt + password),
-    { name: 'PBKDF2' },
+    passwordBytes,
+    'PBKDF2',
     false,
     ['deriveBits']
   );
   
-  const vaultKeyBits = await crypto.subtle.deriveBits(
+  // PBKDF2 with 100,000 iterations (matches your spec)
+  const derivedBits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
-      salt: encoder.encode(vaultSalt),
+      salt: saltBytes.buffer.slice(saltBytes.byteOffset, saltBytes.byteOffset + saltBytes.byteLength) as ArrayBuffer,
       iterations: 100000,
       hash: 'SHA-256'
     },
     keyMaterial,
-    256
+    256 // 32 bytes for AES-256
   );
+  
+  return new Uint8Array(derivedBits);
+}
+
+/**
+ * Fork password into auth_key and vault_key (encryption_key)
+ * @deprecated Use deriveEncryptionKey for vault decryption
+ * 
+ * @param password - User's plaintext password
+ * @param salt - Salt from profiles/user_vaults table (hex string)
+ * @returns authKey (for Supabase) and vaultKey (for AES decryption)
+ */
+export async function forkPassword(
+  password: string, 
+  salt: string
+): Promise<{ authKey: string; vaultKey: Uint8Array }> {
+  // PATH A: Auth Key (fast SHA256) - used for Supabase auth
+  const authInput = AUTH_FORK_DOMAIN + salt + password;
+  const authKey = await sha256(authInput);
+  
+  // PATH B: Vault Key using PBKDF2 (100,000 iterations)
+  const vaultKey = await deriveEncryptionKey(password, salt);
   
   return {
     authKey,
-    vaultKey: new Uint8Array(vaultKeyBits)
+    vaultKey
   };
 }
 
@@ -394,33 +432,40 @@ export async function forkPassword(
 
 /**
  * Encrypt vault with AES-256-GCM
+ * @param seed - 32-byte seed to encrypt (or JSON string for legacy)
+ * @param encryptionKey - 32-byte AES key derived from PBKDF2
+ * @returns Base64 ciphertext and hex nonce
  */
 export async function encryptVault(
-  mnemonic: string, 
-  vaultKey: Uint8Array, 
-  vaultSalt: string
+  seed: Uint8Array | string, 
+  encryptionKey: Uint8Array
 ): Promise<{ ciphertext: string; nonce: string }> {
   const nonce = randomBytes(12);
-  const encoder = new TextEncoder();
-  const data = encoder.encode(mnemonic);
+  
+  // Convert to bytes if string (legacy JSON format)
+  let dataBytes: Uint8Array;
+  if (typeof seed === 'string') {
+    dataBytes = new TextEncoder().encode(seed);
+  } else {
+    dataBytes = seed;
+  }
   
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
-    vaultKey.buffer.slice(vaultKey.byteOffset, vaultKey.byteOffset + vaultKey.byteLength) as ArrayBuffer,
+    encryptionKey.buffer.slice(encryptionKey.byteOffset, encryptionKey.byteOffset + encryptionKey.byteLength) as ArrayBuffer,
     { name: 'AES-GCM' },
     false,
     ['encrypt']
   );
   
-  const aad = encoder.encode(vaultSalt);
+  // No additional authenticated data - matches decryptVault
   const ciphertext = await crypto.subtle.encrypt(
     {
       name: 'AES-GCM',
-      iv: nonce.buffer.slice(nonce.byteOffset, nonce.byteOffset + nonce.byteLength) as ArrayBuffer,
-      additionalData: aad
+      iv: nonce.buffer.slice(nonce.byteOffset, nonce.byteOffset + nonce.byteLength) as ArrayBuffer
     },
     cryptoKey,
-    data
+    dataBytes.buffer.slice(dataBytes.byteOffset, dataBytes.byteOffset + dataBytes.byteLength) as ArrayBuffer
   );
   
   return {
@@ -431,16 +476,23 @@ export async function encryptVault(
 
 /**
  * Decrypt vault with AES-256-GCM
+ * @param encryptedBlob - Base64 encoded ciphertext (includes auth tag)
+ * @param nonceHex - Hex encoded nonce/IV (12 bytes)
+ * @param vaultKey - 32-byte AES key derived from Argon2id
+ * @returns Decrypted JSON string containing private_key
  */
 export async function decryptVault(
-  ciphertext: string, 
+  encryptedBlob: string, 
   nonceHex: string, 
-  vaultKey: Uint8Array, 
-  vaultSalt: string
+  vaultKey: Uint8Array
 ): Promise<string> {
-  const nonce = hexToBytes(nonceHex);
-  const ciphertextBytes = Uint8Array.from(atob(ciphertext), c => c.charCodeAt(0));
+  // Decode base64 ciphertext
+  const ciphertextBytes = Uint8Array.from(atob(encryptedBlob), c => c.charCodeAt(0));
   
+  // Decode hex nonce
+  const nonce = hexToBytes(nonceHex);
+  
+  // Import vault key for AES-GCM
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
     vaultKey.buffer.slice(vaultKey.byteOffset, vaultKey.byteOffset + vaultKey.byteLength) as ArrayBuffer,
@@ -449,14 +501,11 @@ export async function decryptVault(
     ['decrypt']
   );
   
-  const encoder = new TextEncoder();
-  const aad = encoder.encode(vaultSalt);
-  
+  // Decrypt (no additional authenticated data)
   const decrypted = await crypto.subtle.decrypt(
     {
       name: 'AES-GCM',
-      iv: nonce.buffer.slice(nonce.byteOffset, nonce.byteOffset + nonce.byteLength) as ArrayBuffer,
-      additionalData: aad
+      iv: nonce.buffer.slice(nonce.byteOffset, nonce.byteOffset + nonce.byteLength) as ArrayBuffer
     },
     cryptoKey,
     ciphertextBytes
@@ -469,56 +518,33 @@ export async function decryptVault(
 // ADDRESS DERIVATION
 // ═══════════════════════════════════════════════════════════════
 
-/**
- * Derive L1 address from public key
- * Address = L1_ + SHA256(pubkey)[0..40].toUpperCase()
- */
-export async function deriveL1Address(publicKey: Uint8Array): Promise<string> {
-  const hash = await sha256(publicKey);
-  return 'L1_' + hash.slice(0, 40).toUpperCase();
-}
-
 // ═══════════════════════════════════════════════════════════════
-// ED25519 OPERATIONS (using tweetnacl loaded globally)
+// ED25519 OPERATIONS (using @noble/ed25519)
 // ═══════════════════════════════════════════════════════════════
 
-declare global {
-  interface Window {
-    nacl?: {
-      sign: {
-        keyPair: {
-          fromSeed: (seed: Uint8Array) => { publicKey: Uint8Array; secretKey: Uint8Array };
-        };
-        detached: (message: Uint8Array, secretKey: Uint8Array) => Uint8Array;
-      };
-    };
-  }
+/**
+ * Create keypair from seed using modern Ed25519 implementation
+ * @param seed - 32-byte seed for key generation
+ * @returns Object with publicKey and secretKey as Uint8Array
+ */
+export async function createKeyPair(seed: Uint8Array): Promise<{ publicKey: Uint8Array; secretKey: Uint8Array }> {
+  const keyPair = await createEd25519KeyPair(seed);
+  return {
+    publicKey: utilHexToBytes(keyPair.publicKey),
+    secretKey: utilHexToBytes(keyPair.privateKey)
+  };
 }
 
 /**
- * Get nacl library (loaded via script tag)
+ * Sign a message with Ed25519 using modern implementation
+ * @param message - Message to sign
+ * @param secretKey - Private key for signing
+ * @returns Signature as Uint8Array
  */
-function getNacl() {
-  if (typeof window !== 'undefined' && window.nacl) {
-    return window.nacl;
-  }
-  throw new Error('tweetnacl not loaded. Add: <script src="https://cdn.jsdelivr.net/npm/tweetnacl/nacl-fast.min.js"></script>');
-}
-
-/**
- * Create keypair from seed
- */
-export function createKeyPair(seed: Uint8Array): { publicKey: Uint8Array; secretKey: Uint8Array } {
-  const nacl = getNacl();
-  return nacl.sign.keyPair.fromSeed(seed);
-}
-
-/**
- * Sign a message with Ed25519
- */
-export function signMessage(message: Uint8Array, secretKey: Uint8Array): Uint8Array {
-  const nacl = getNacl();
-  return nacl.sign.detached(message, secretKey);
+export async function signMessage(message: Uint8Array, secretKey: Uint8Array): Promise<Uint8Array> {
+  const secretKeyHex = utilBytesToHex(secretKey);
+  const signatureHex = await signEd25519Message(message, secretKeyHex);
+  return utilHexToBytes(signatureHex);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -548,7 +574,7 @@ export async function createCanonicalPayloadHash(
 }
 
 /**
- * Sign a transfer transaction using V1 format
+ * Sign a transfer transaction using V2 canonical format
  */
 export async function signTransfer(
   secretKey: Uint8Array,
@@ -558,57 +584,60 @@ export async function signTransfer(
   amount: number
 ): Promise<{
   public_key: string;
-  wallet_address: string;
-  payload: string;
+  payload_hash: string;
+  payload_fields: Record<string, any>;
+  operation_type: string;
+  schema_version: number;
   timestamp: number;
   nonce: string;
   chain_id: number;
-  schema_version: number;
+  request_path: string;
   signature: string;
 }> {
   const timestamp = Math.floor(Date.now() / 1000);
   const nonce = generateNonce();
+  const operationType = 'transfer';
+  const requestPath = '/transfer';
   
-  // V1 Format: Raw JSON payload (NOT hashed)
-  const payload = { to, amount };
-  const payloadJson = JSON.stringify(payload);
+  // V2 Format: Canonical payload with ordered fields
+  const payloadFields = { from, to, amount, timestamp, nonce };
   
-  // Message: {payload}\n{timestamp}\n{nonce}
-  const message = `${payloadJson}\n${timestamp}\n${nonce}`;
+  // Create canonical hash
+  const payloadHash = await createCanonicalPayloadHash(operationType, payloadFields);
   
-  console.log('🔐 V1 Signature Debug:');
+  // Construct signing message with domain separation
+  // Server expects: BLACKBOOK_L{chain_id}{request_path} (no underscore between L1 and path)
+  const domainPrefix = `BLACKBOOK_L${CHAIN_ID_L1}${requestPath}`;
+  const message = `${domainPrefix}\n${payloadHash}\n${timestamp}\n${nonce}`;
+  
+  console.log('🔐 V2 Signature Debug:');
+  console.log('  Operation:', operationType);
   console.log('  From:', from);
   console.log('  To:', to);
   console.log('  Amount:', amount);
-  console.log('  Payload JSON:', payloadJson);
+  console.log('  Payload Fields:', payloadFields);
+  console.log('  Payload Hash:', payloadHash);
+  console.log('  Domain:', domainPrefix);
   console.log('  Message:', message);
   console.log('  PublicKey (hex):', bytesToHex(publicKey));
-  console.log('  SecretKey length:', secretKey.length);
-  
-  // Prepend chain_id byte (0x01 for L1)
-  const chainIdByte = new Uint8Array([CHAIN_ID_L1]);
-  const messageBytes = new TextEncoder().encode(message);
-  const fullMessage = new Uint8Array(chainIdByte.length + messageBytes.length);
-  fullMessage.set(chainIdByte);
-  fullMessage.set(messageBytes, chainIdByte.length);
-  
-  console.log('  Full Message (with chain_id):', bytesToHex(fullMessage));
   
   // Sign with Ed25519
-  const signature = signMessage(fullMessage, secretKey);
-  
+  const messageBytes = new TextEncoder().encode(message);
+  const signature = await signMessage(messageBytes, secretKey);
+
   const signedRequest = {
     public_key: bytesToHex(publicKey),
-    wallet_address: from,
-    payload: payloadJson,  // Raw JSON string
+    payload_hash: payloadHash,
+    payload_fields: payloadFields,
+    operation_type: operationType,
+    schema_version: 2,  // V2 canonical format
     timestamp,
     nonce,
     chain_id: CHAIN_ID_L1,
-    schema_version: 1,  // V1 format
+    request_path: requestPath,
     signature: bytesToHex(signature)
   };
   
-  console.log('  Public Key (hex):', signedRequest.public_key);
   console.log('  Signature (hex):', signedRequest.signature);
   console.log('  Full Request:', JSON.stringify(signedRequest, null, 2));
   
@@ -637,11 +666,245 @@ export interface WalletCreationResult {
   vaultSalt: string;
 }
 
+/**
+ * UnlockedWallet - DEPRECATED
+ * Use VaultSession + derivePrivateKeyOnDemand() instead
+ * Private keys should NEVER be stored, only derived when needed
+ */
 export interface UnlockedWallet {
   address: string;
   publicKey: Uint8Array;
   secretKey: Uint8Array;
   mnemonic: string;
+}
+
+/**
+ * VaultSession - Secure wallet session (no private key stored)
+ * Contains only the data needed to derive private keys on-demand
+ */
+export interface VaultSession {
+  address: string;           // L1 wallet address
+  publicKey: string;         // Public key (hex)
+  encryptedBlob: string;     // Encrypted vault data (base64)
+  nonce: string;             // AES-GCM nonce (hex)
+  salt: string;              // Salt for key derivation (hex)
+}
+
+/**
+ * Decrypted vault structure (from encrypted_blob)
+ * Can be either:
+ * - Raw 32-byte seed (binary)
+ * - JSON with private_key field (legacy)
+ */
+export interface DecryptedVault {
+  private_key: string;       // 64 hex chars (32 bytes seed)
+  mnemonic?: string;         // Optional mnemonic phrase
+}
+
+/**
+ * Derive encryption key using LEGACY SHA256 method (for old vaults)
+ * This was the original method before PBKDF2 was implemented
+ */
+async function deriveLegacyEncryptionKey(password: string, salt: string): Promise<Uint8Array> {
+  // Old method: SHA256(VAULT_FORK_DOMAIN + salt + password)
+  const input = VAULT_FORK_DOMAIN + salt + password;
+  const hashHex = await sha256(input);
+  return hexToBytes(hashHex);
+}
+
+/**
+ * Unlock wallet: Derive keypair from encrypted vault
+ * 
+ * STEP 1: password + salt → encryption_key (PBKDF2, 100k iterations)
+ * STEP 2: encryption_key + vault_blob → seed (AES-256-GCM decrypt)
+ * STEP 3: seed → keypair (modern Ed25519 with @noble/ed25519)
+ * VERIFY: derived public_key === stored public_key
+ * 
+ * @param session - VaultSession with encrypted blob
+ * @param password - User's password
+ * @returns secretKey (64 bytes), publicKey (32 bytes) for signing
+ */
+export async function derivePrivateKeyOnDemand(
+  session: VaultSession,
+  password: string
+): Promise<{ secretKey: Uint8Array; publicKey: Uint8Array; address: string }> {
+  console.log('🔓 Unlocking wallet...');
+  console.log('  Address:', session.address);
+  console.log('  Salt:', session.salt?.substring(0, 16) + '...');
+  console.log('  Nonce:', session.nonce?.substring(0, 16) + '...');
+  
+  // Try PBKDF2 first, then fallback to legacy SHA256 method
+  let seed: Uint8Array | null = null;
+  let usedLegacy = false;
+  
+  // Decode ciphertext and nonce once
+  const ciphertextBytes = Uint8Array.from(atob(session.encryptedBlob), c => c.charCodeAt(0));
+  const nonce = hexToBytes(session.nonce);
+  
+  // Helper function to attempt decryption with a given key
+  async function tryDecrypt(encryptionKey: Uint8Array, methodName: string): Promise<Uint8Array | null> {
+    try {
+      console.log(`  Trying ${methodName}...`);
+      
+      // Import encryption key for AES-GCM
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        encryptionKey.buffer.slice(encryptionKey.byteOffset, encryptionKey.byteOffset + encryptionKey.byteLength) as ArrayBuffer,
+        { name: 'AES-GCM' },
+        false,
+        ['decrypt']
+      );
+      
+      // Decrypt
+      const decrypted = await crypto.subtle.decrypt(
+        {
+          name: 'AES-GCM',
+          iv: nonce.buffer.slice(nonce.byteOffset, nonce.byteOffset + nonce.byteLength) as ArrayBuffer
+        },
+        cryptoKey,
+        ciphertextBytes.buffer.slice(ciphertextBytes.byteOffset, ciphertextBytes.byteOffset + ciphertextBytes.byteLength) as ArrayBuffer
+      );
+      
+      const decryptedBytes = new Uint8Array(decrypted);
+      
+      // Check if it's raw 32-byte seed or JSON
+      if (decryptedBytes.length === 32) {
+        console.log(`  ✓ ${methodName} succeeded (32 bytes raw)`);
+        return decryptedBytes;
+      } else {
+        // Try parsing as JSON (legacy format)
+        const decryptedStr = new TextDecoder().decode(decryptedBytes);
+        try {
+          const vault: DecryptedVault = JSON.parse(decryptedStr);
+          console.log(`  ✓ ${methodName} succeeded (from JSON private_key)`);
+          return hexToBytes(vault.private_key);
+        } catch {
+          // Maybe it's hex-encoded seed?
+          if (decryptedStr.length === 64 && /^[0-9a-fA-F]+$/.test(decryptedStr)) {
+            console.log(`  ✓ ${methodName} succeeded (hex string)`);
+            return hexToBytes(decryptedStr);
+          } else {
+            console.log(`  ✗ ${methodName} failed: Unknown vault format`);
+            return null;
+          }
+        }
+      }
+    } catch (error) {
+      console.log(`  ✗ ${methodName} failed:`, error instanceof Error ? error.message : 'OperationError');
+      return null;
+    }
+  }
+  
+  // STEP 1a: Try PBKDF2 method first (new method)
+  console.log('  STEP 1: Deriving encryption key with PBKDF2...');
+  const pbkdf2Key = await deriveEncryptionKey(password, session.salt);
+  seed = await tryDecrypt(pbkdf2Key, 'PBKDF2');
+  
+  // STEP 1b: If PBKDF2 failed, try legacy SHA256 method
+  if (!seed) {
+    console.log('  STEP 1b: Trying legacy SHA256 key derivation...');
+    const legacyKey = await deriveLegacyEncryptionKey(password, session.salt);
+    seed = await tryDecrypt(legacyKey, 'Legacy SHA256');
+    usedLegacy = true;
+  }
+  
+  if (!seed) {
+    throw new Error('Failed to decrypt vault. Wrong password?');
+  }
+  
+  if (usedLegacy) {
+    console.log('  ⚠️ Vault uses legacy encryption - consider migrating to PBKDF2');
+  }
+  
+  // STEP 3: seed → keypair
+  console.log('  STEP 3: Deriving keypair from seed...');
+  const keyPair = await createKeyPair(seed);
+  console.log('  ✓ keypair.publicKey derived');
+  console.log('  ✓ keypair.secretKey derived (NEVER share)');
+  
+  // Derive address from public key
+  const address = deriveL1Address(keyPair.publicKey);
+  
+  // VERIFY: derived public_key === stored public_key
+  const derivedPubKeyHex = bytesToHex(keyPair.publicKey);
+  console.log('  VERIFY: derived public_key === stored public_key?');
+  console.log('    Derived:', derivedPubKeyHex.substring(0, 16) + '...');
+  console.log('    Stored: ', session.publicKey?.substring(0, 16) + '...');
+  
+  if (session.publicKey && derivedPubKeyHex.toLowerCase() !== session.publicKey.toLowerCase()) {
+    console.error('  ✗ Public key mismatch! Wallet unlock failed.');
+    throw new Error('Public key mismatch. Wrong password or corrupted vault.');
+  }
+  console.log('  ✓ YES - wallet unlocked!');
+  
+  return {
+    secretKey: keyPair.secretKey,  // 64 bytes (seed + pubkey)
+    publicKey: keyPair.publicKey,  // 32 bytes
+    address
+  };
+}
+
+/**
+ * Create vault session from Supabase profile data
+ * This should be called after user login to set up the session
+ * 
+ * @param profileData - Data from profiles + user_vaults tables
+ */
+export function createVaultSession(
+  address: string,
+  publicKey: string,
+  encryptedBlob: string,
+  nonce: string,
+  salt: string
+): VaultSession {
+  return {
+    address,
+    publicKey,
+    encryptedBlob,
+    nonce,
+    salt
+  };
+}
+
+/**
+ * Sign a blockchain request using on-demand key derivation
+ * Private key is derived, used for signing, then cleared from memory
+ * 
+ * @param session - VaultSession from Supabase data
+ * @param password - User's password
+ * @param payload - The payload to sign
+ * @param chainId - 1 for L1, 2 for L2
+ */
+export async function signRequestSecure(
+  session: VaultSession,
+  password: string,
+  payload: object,
+  chainId: number = 1
+): Promise<{ payload: object; signature: string; public_key: string }> {
+  // Derive private key on-demand
+  const { secretKey, publicKey } = await derivePrivateKeyOnDemand(session, password);
+  
+  try {
+    // Serialize payload
+    const message = JSON.stringify(payload);
+    const messageBytes = new TextEncoder().encode(message);
+    
+    // Domain separation: prepend chain ID
+    const domainPrefix = chainId === 1 ? L1_DOMAIN_PREFIX : L2_DOMAIN_PREFIX;
+    const fullMessage = new Uint8Array([...domainPrefix, ...messageBytes]);
+    
+    // Sign with Ed25519
+    const signature = await signMessage(fullMessage, secretKey);
+    
+    return {
+      payload,
+      signature: bytesToHex(signature),
+      public_key: bytesToHex(publicKey)
+    };
+  } finally {
+    // Clear sensitive data from memory (best effort)
+    secretKey.fill(0);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -650,6 +913,7 @@ export interface UnlockedWallet {
 
 /**
  * Create a new wallet with encrypted vault
+ * Uses Argon2id for vault key derivation
  */
 export async function createWallet(password: string, mnemonic?: string): Promise<WalletCreationResult> {
   // Generate or use provided mnemonic
@@ -657,20 +921,28 @@ export async function createWallet(password: string, mnemonic?: string): Promise
   
   // Derive seed and keypair
   const seed = await mnemonicToSeed(actualMnemonic);
-  const keyPair = createKeyPair(seed);
+  const keyPair = await createKeyPair(seed);
   
   // Derive L1 address
-  const address = await deriveL1Address(keyPair.publicKey);
+  const address = deriveL1Address(keyPair.publicKey);
   
-  // Generate salts
-  const authSalt = bytesToHex(randomBytes(32));
-  const vaultSalt = bytesToHex(randomBytes(32));
+  // Generate salt (single salt used for both auth and vault)
+  const salt = bytesToHex(randomBytes(32));
   
-  // Fork password
-  const { authKey, vaultKey } = await forkPassword(password, authSalt, vaultSalt);
+  // Derive encryption key using PBKDF2
+  const encryptionKey = await deriveEncryptionKey(password, salt);
   
-  // Encrypt vault
-  const { ciphertext, nonce } = await encryptVault(actualMnemonic, vaultKey, vaultSalt);
+  // Get auth key (for Supabase login)
+  const { authKey } = await forkPassword(password, salt);
+  
+  // Create vault data containing private key (not mnemonic for simpler decryption)
+  const vaultData = JSON.stringify({
+    private_key: bytesToHex(seed),  // 32-byte seed as hex
+    mnemonic: actualMnemonic        // Optional: include mnemonic for backup
+  });
+  
+  // Encrypt vault with PBKDF2-derived key
+  const { ciphertext, nonce } = await encryptVault(vaultData, encryptionKey);
   
   return {
     mnemonic: actualMnemonic,
@@ -678,27 +950,28 @@ export async function createWallet(password: string, mnemonic?: string): Promise
     publicKey: bytesToHex(keyPair.publicKey),
     encryptedVault: {
       version: 2,
-      salt: vaultSalt,
+      salt: salt,
       ciphertext,
       nonce
     },
     authKey,
-    vaultKey: bytesToHex(vaultKey),  // Include vaultKey for session storage
-    authSalt,
-    vaultSalt
+    vaultKey: bytesToHex(encryptionKey),  // Include encryption key for session storage
+    authSalt: salt,
+    vaultSalt: salt
   };
 }
 
 /**
- * Unlock wallet from encrypted vault
- * Can unlock with password OR directly with vaultKey (for session-based auto-unlock)
+ * Unlock wallet from encrypted vault (LEGACY - for test accounts)
+ * For user wallets, use derivePrivateKeyOnDemand() instead
+ * 
+ * @deprecated Use derivePrivateKeyOnDemand for production
  */
 export async function unlockWallet(
   password: string,
   encryptedBlob: string,
   nonce: string,
-  authSalt: string,
-  vaultSalt: string,
+  salt: string,
   existingVaultKey?: Uint8Array
 ): Promise<UnlockedWallet> {
   // Use provided vaultKey or derive from password
@@ -706,19 +979,33 @@ export async function unlockWallet(
   if (existingVaultKey) {
     vaultKey = existingVaultKey;
   } else {
-    const derived = await forkPassword(password, authSalt, vaultSalt);
+    const derived = await forkPassword(password, salt);
     vaultKey = derived.vaultKey;
   }
   
   // Decrypt vault
-  const mnemonic = await decryptVault(encryptedBlob, nonce, vaultKey, vaultSalt);
+  const decryptedJson = await decryptVault(encryptedBlob, nonce, vaultKey);
+  
+  // Parse decrypted data - could be JSON or raw mnemonic
+  let privateKeySeed: Uint8Array;
+  let mnemonic: string;
+  
+  try {
+    const vault = JSON.parse(decryptedJson);
+    privateKeySeed = hexToBytes(vault.private_key);
+    mnemonic = vault.mnemonic || '';
+  } catch {
+    // Legacy format: decrypted data is raw mnemonic
+    mnemonic = decryptedJson;
+    const seed = await mnemonicToSeed(mnemonic);
+    privateKeySeed = seed;
+  }
   
   // Derive keypair
-  const seed = await mnemonicToSeed(mnemonic);
-  const keyPair = createKeyPair(seed);
+  const keyPair = await createKeyPair(privateKeySeed);
   
   // Derive address
-  const address = await deriveL1Address(keyPair.publicKey);
+  const address = deriveL1Address(keyPair.publicKey);
   
   return {
     address,
@@ -752,9 +1039,9 @@ export async function sendTransfer(
   }
   
   // Ed25519 requires 64-byte secret key (32-byte seed + 32-byte public key)
-  // If we only have the 32-byte seed, derive the proper keypair using nacl
+  // If we only have the 32-byte seed, derive the proper keypair using modern Ed25519
   if (privateKey.length === 32) {
-    const keyPair = nacl.sign.keyPair.fromSeed(privateKey);
+    const keyPair = await createKeyPair(privateKey);
     privateKey = keyPair.secretKey;
     // Verify the public key matches
     if (bytesToHex(keyPair.publicKey) !== bytesToHex(publicKey)) {
@@ -788,6 +1075,58 @@ export async function sendTransfer(
   console.log('📥 Transfer response:', result);
   
   return result;
+}
+
+/**
+ * Send a transfer transaction using on-demand key derivation (SECURE)
+ * Private key is derived, used for signing, and immediately discarded
+ * 
+ * @param session - VaultSession with encrypted vault data
+ * @param password - User's password for key derivation
+ * @param to - Recipient address
+ * @param amount - Amount to send
+ */
+export async function sendTransferSecure(
+  session: VaultSession,
+  password: string,
+  to: string,
+  amount: number
+): Promise<{ success: boolean; tx_id?: string; error?: string }> {
+  console.log('📤 Sending secure transfer:', { from: session.address, to, amount });
+  
+  // Derive private key on-demand
+  const { secretKey, publicKey, address } = await derivePrivateKeyOnDemand(session, password);
+  
+  try {
+    const signedRequest = await signTransfer(
+      secretKey,
+      publicKey,
+      address,
+      to,
+      amount
+    );
+    
+    console.log('📡 Posting transfer via API proxy');
+    
+    // Use Next.js API proxy to avoid CORS issues
+    const response = await fetch('/api/l1-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: '/transfer',
+        method: 'POST',
+        data: signedRequest
+      })
+    });
+    
+    const result = await response.json();
+    console.log('📥 Transfer response:', result);
+    
+    return result;
+  } finally {
+    // Clear sensitive data from memory (best effort)
+    secretKey.fill(0);
+  }
 }
 
 /**

@@ -25,7 +25,7 @@ export async function authenticateL2(wallet: UnlockedWallet): Promise<string> {
   
   // Sign with wallet's private key
   const messageBytes = new TextEncoder().encode(message)
-  const signature = signMessage(messageBytes, wallet.secretKey)
+  const signature = await signMessage(messageBytes, wallet.secretKey)
   
   console.log('🔐 Authenticating with L2 Markets...')
   
