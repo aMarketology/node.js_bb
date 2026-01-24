@@ -12,6 +12,7 @@
   "dependencies": {
     "@noble/ed25519": "^3.0.0",
     "@supabase/supabase-js": "^2.89.0",
+    "crypto-js": "^4.2.0",
     "framer-motion": "^12.24.7",
     "js-cookie": "^3.0.5",
     "next": "^14.0.0",

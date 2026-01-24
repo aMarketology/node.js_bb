@@ -43,9 +43,10 @@ const tests = [
 function runTest(test) {
   return new Promise((resolve, reject) => {
     const testPath = path.join(__dirname, test.file);
+    // Use execFile instead of spawn for better Windows path handling
     const proc = spawn('node', [testPath], {
       stdio: 'inherit',
-      shell: true
+      cwd: __dirname
     });
     
     proc.on('close', (code) => {

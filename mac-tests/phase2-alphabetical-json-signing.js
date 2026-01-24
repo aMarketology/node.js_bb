@@ -56,20 +56,26 @@ function sortKeysAlphabetically(obj) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// KEY DERIVATION HELPER
+// KEY DERIVATION HELPER (using CryptoJS - exact match to wallet creation)
 // ═══════════════════════════════════════════════════════════════════════════
 
 function deriveKeypair(vault, password) {
+  // 1. Derive encryption key using PBKDF2
   const encryptionKey = CryptoJS.PBKDF2(password, vault.salt, {
     keySize: 256 / 32,
     iterations: 100000,
     hasher: CryptoJS.algo.SHA256
   });
   
-  const decrypted = CryptoJS.AES.decrypt(vault.encryptedBlob, encryptionKey.toString());
+  // 2. Decrypt the vault to get seed
+  const decrypted = CryptoJS.AES.decrypt(
+    vault.encryptedBlob, 
+    encryptionKey.toString()
+  );
   const seedHex = decrypted.toString(CryptoJS.enc.Utf8);
-  const seedBytes = Buffer.from(seedHex, 'hex');
   
+  // 3. Derive Ed25519 keypair from seed
+  const seedBytes = Buffer.from(seedHex, 'hex');
   return nacl.sign.keyPair.fromSeed(new Uint8Array(seedBytes));
 }
 

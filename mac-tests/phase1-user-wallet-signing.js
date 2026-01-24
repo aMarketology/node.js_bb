@@ -12,8 +12,8 @@
  */
 
 import nacl from 'tweetnacl';
-import CryptoJS from 'crypto-js';
 import { Buffer } from 'buffer';
+import CryptoJS from 'crypto-js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAC'S WALLET CREDENTIALS (from macwallet.txt)
@@ -50,6 +50,38 @@ function createVaultSession(address, publicKey, encryptedBlob, nonce, salt) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CRYPTO HELPERS (using CryptoJS - exact match to wallet creation)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Decrypt vault using CryptoJS - matches the exact code from macwallet.txt
+ * 
+ * Steps:
+ * 1. Derive encryption key using PBKDF2
+ * 2. Decrypt the vault using AES with the key as passphrase
+ * 3. Return the seed hex string
+ */
+function decryptVaultCryptoJS(encryptedBlob, password, vaultSalt) {
+  // 1. Derive encryption key using PBKDF2
+  const encryptionKey = CryptoJS.PBKDF2(password, vaultSalt, {
+    keySize: 256 / 32,
+    iterations: 100000,
+    hasher: CryptoJS.algo.SHA256
+  });
+  
+  // 2. Decrypt the vault to get seed
+  const decrypted = CryptoJS.AES.decrypt(
+    encryptedBlob, 
+    encryptionKey.toString()
+  );
+  
+  // 3. Convert to UTF8 string (should be hex seed)
+  const seedHex = decrypted.toString(CryptoJS.enc.Utf8);
+  
+  return seedHex;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ON-DEMAND KEY DERIVATION (mirrors derivePrivateKeyOnDemand from blackbook-wallet.ts)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -62,22 +94,8 @@ async function derivePrivateKeyOnDemand(vaultSession, password) {
     throw new Error('Vault session missing encrypted blob or salt');
   }
   
-  // Derive encryption key using PBKDF2
-  const encryptionKey = CryptoJS.PBKDF2(password, vaultSession.salt, {
-    keySize: 256 / 32,
-    iterations: 100000,
-    hasher: CryptoJS.algo.SHA256
-  });
-  
-  console.log('   ✓ PBKDF2 key derived (100k iterations)');
-  
-  // Decrypt the vault to get seed
-  const decrypted = CryptoJS.AES.decrypt(
-    vaultSession.encryptedBlob,
-    encryptionKey.toString()
-  );
-  
-  const seedHex = decrypted.toString(CryptoJS.enc.Utf8);
+  // Decrypt the vault to get seed (CryptoJS format)
+  const seedHex = decryptVaultCryptoJS(vaultSession.encryptedBlob, password, vaultSession.salt);
   
   if (!seedHex || seedHex.length !== 64) {
     throw new Error('Failed to decrypt vault - invalid password or corrupted vault');

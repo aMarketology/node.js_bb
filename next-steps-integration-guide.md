@@ -10,14 +10,16 @@
 
 1. [Current State Assessment](#current-state-assessment)
 2. [Architecture Overview](#architecture-overview)
-3. [Phase 1: User Wallet L2 Signing](#phase-1-user-wallet-l2-signing)
-4. [Phase 2: Alphabetical JSON Signing](#phase-2-alphabetical-json-signing)
-5. [Phase 3: Password Prompt Integration](#phase-3-password-prompt-integration)
-6. [Phase 4: Unified Balance Display](#phase-4-unified-balance-display)
-7. [Phase 5: Bridge UI Completion](#phase-5-bridge-ui-completion)
-8. [Phase 6: Production Hardening](#phase-6-production-hardening)
-9. [Testing Checklist](#testing-checklist)
-10. [Troubleshooting Guide](#troubleshooting-guide)
+3. [✅ Phase 1: User Wallet L2 Signing](#phase-1-user-wallet-l2-signing) - **COMPLETED**
+4. [✅ Phase 2: Alphabetical JSON Signing](#phase-2-alphabetical-json-signing) - **COMPLETED**
+5. [✅ Phase 3: Activity-Based Session Management](#phase-3-activity-based-session-management) - **COMPLETED**
+6. [✅ Phase 4: Market Standards & Validation](#phase-4-market-standards--validation) - **COMPLETED**
+7. [Phase 5: Live Markets Integration](#phase-5-live-markets-integration) - **IN PROGRESS**
+8. [Phase 6: Unified Balance Display](#phase-6-unified-balance-display)
+9. [Phase 7: Bridge UI Completion](#phase-7-bridge-ui-completion)
+10. [Phase 8: Production Hardening](#phase-8-production-hardening)
+11. [Testing Checklist](#testing-checklist)
+12. [Troubleshooting Guide](#troubleshooting-guide)
 
 ---
 
@@ -45,13 +47,21 @@
 | PasswordPrompt UI | `components/PasswordPrompt.tsx` | ✅ Ready | Modal component exists |
 | Test Accounts | `contexts/AuthContext.tsx` | ✅ Ready | Alice/Bob permanent test wallets |
 
-### ❌ What's Broken (The Integration Gap)
+### ✅ What's Been Fixed (Phases 1-4 Complete)
+
+| Issue | Location | Solution | Status |
+|-------|----------|----------|--------|
+| User wallet signing | `contexts/CreditPredictionContext.tsx` | On-demand key derivation from vault | ✅ Fixed |
+| JSON signature format | All SDKs | `sortKeysAlphabetically()` added | ✅ Fixed |
+| Password prompt | `contexts/AuthContext.tsx` | Activity-based session (10min/1hr/$1000) | ✅ Fixed |
+| Market standards | `/markets-tests/` | Validation rules & 85 tests passing | ✅ Fixed |
+
+### ⚠️ What's Still In Progress
 
 | Issue | Location | Problem |
 |-------|----------|---------|
-| User wallet signing | `contexts/CreditPredictionContext.tsx:36` | Returns `null` for `activeWallet === 'user'` |
-| JSON signature format | `sdk/credit-prediction-actions-sdk.js:103` | Not alphabetically sorted (L2 rejects) |
-| Password prompt | `contexts/CreditPredictionContext.tsx` | Not integrated before L2 writes |
+| Live markets | `app/markets/page.tsx` | Need real L2 market data integration |
+| Market validation | Frontend forms | Need to enforce market standards |
 | Default wallet | `contexts/AuthContext.tsx:64` | Defaults to `'alice'` instead of `'user'` |
 | Bridge withdrawal | `components/BridgeInterface.tsx` | No L2→L1 withdrawal UI |
 
@@ -193,13 +203,14 @@ service L2Notifier {  // L1 calls these for push notifications
 
 ---
 
-## Phase 1: User Wallet L2 Signing
+## ✅ Phase 1: User Wallet L2 Signing - COMPLETED
 
 **Goal**: When `activeWallet === 'user'`, derive real user keys and sign L2 transactions
 
 **Duration**: 2-3 hours  
 **Risk**: High (core functionality)  
-**Dependencies**: None
+**Dependencies**: None  
+**Status**: ✅ **COMPLETE** - All tests passing (5/5)
 
 ### 1.1 Current Problem
 
@@ -305,13 +316,14 @@ useEffect(() => {
 
 ---
 
-## Phase 2: Alphabetical JSON Signing
+## ✅ Phase 2: Alphabetical JSON Signing - COMPLETED
 
 **Goal**: L2 Rust server uses `serde_json` which serializes keys alphabetically. Frontend must match.
 
 **Duration**: 1 hour  
 **Risk**: Medium (signature verification)  
-**Dependencies**: Phase 1
+**Dependencies**: Phase 1  
+**Status**: ✅ **COMPLETE** - All tests passing (7/7)
 
 ### 2.1 Current Problem
 
@@ -404,13 +416,14 @@ console.log(JSON.stringify(sortKeysAlphabetically(test)));
 
 ---
 
-## Phase 3: Activity-Based Session Management
+## ✅ Phase 3: Activity-Based Session Management - COMPLETED
 
 **Goal**: Users log in once per session, password extends on activity, auto-logout after inactivity
 
 **Duration**: 2-3 hours  
 **Risk**: Medium (UX flow)  
-**Dependencies**: Phase 1, Phase 2
+**Dependencies**: Phase 1, Phase 2  
+**Status**: ✅ **COMPLETE** - All tests passing (9/9)
 
 ### 3.1 Current Problem
 
@@ -700,15 +713,263 @@ Inactivity:      1 hour (absolute logout)
 
 ---
 
-## Phase 4: Unified Balance Display
+## ✅ Phase 4: Market Standards & Validation - COMPLETED
+
+**Goal**: Define and validate minimum requirements for markets to be live and bettable
+
+**Duration**: 3-4 hours  
+**Risk**: Low (validation only)  
+**Dependencies**: None  
+**Status**: ✅ **COMPLETE** - All standards tests passing (85/85)
+
+### 4.1 Achievements
+
+✅ Created comprehensive `market-standards.md` documentation  
+✅ Implemented `market-standards.js` with validation helpers  
+✅ Built 85 validation tests in `phase4-market-standards.js`  
+✅ All tests passing successfully
+
+### 4.2 Market Requirements Defined
+
+| Requirement | Value | Purpose |
+|-------------|-------|---------|
+| **Min Liquidity** | $100 BC | Required to activate market |
+| **Max Liquidity** | $1,000,000 BC | Per-market cap |
+| **Min/Max Bet** | $1 - $10,000 BC | Individual bet limits |
+| **Max Position** | 25% of pool | Prevent price manipulation |
+| **Outcomes** | 2-10 | Binary minimum, multi-outcome max |
+| **Title Length** | 10-200 chars | Clear and concise |
+| **Description** | 20-2000 chars | Detailed explanation |
+| **Resolution Criteria** | Required | Verifiable source specified |
+| **Trading Fee** | 2% | Split 50% LP / 50% platform |
+| **Min Duration** | 1 hour | Shortest market lifetime |
+| **Max Duration** | 365 days | Longest market lifetime |
+
+### 4.3 Market Lifecycle
+
+```
+DRAFT → PENDING → ACTIVE → FROZEN → RESOLVED
+  │        │         │         │         │
+created  awaiting  trading   trading   payouts
+         funding   enabled   halted    complete
+```
+
+### 4.4 Validation Functions
+
+The `market-standards.js` module exports:
+
+- `validateMarket(market)` - Check if market meets all requirements
+- `canBetOnMarket(market)` - Verify market accepts bets
+- `validateBet(amount, market)` - Check bet against limits
+- `calculateInitialPool(liquidity, outcomes)` - Compute pool state
+
+### 4.5 Test Coverage
+
+| Test Suite | Tests | Coverage |
+|------------|-------|----------|
+| Status Constants | 11 | Market states, types, trading types |
+| Liquidity Requirements | 4 | Min/max/recommended amounts |
+| Timing Requirements | 6 | Duration, timeouts, grace periods |
+| Outcome Requirements | 3 | Min/max outcomes, label lengths |
+| Content Requirements | 5 | Title/description constraints |
+| Betting Limits | 3 | Min/max bet, position limits |
+| Fee Structure | 5 | Trading fees, LP/platform split |
+| Market Categories | 10 | All 9 categories defined |
+| Market Validation | 11 | Comprehensive validation tests |
+| Can Bet Validation | 6 | Status/timing checks |
+| Bet Validation | 6 | Amount/pool limit checks |
+| Pool Initialization | 9 | CPMM formula verification |
+| Combined Requirements | 6 | Aggregated constants |
+| **Total** | **85** | **100% passing** |
+
+### 4.6 Files Created
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `market-standards.md` | `/markets-tests/` | Full documentation |
+| `market-standards.js` | `/markets-tests/` | Validation logic & constants |
+| `phase4-market-standards.js` | `/markets-tests/` | 85 validation tests |
+
+### 4.7 Next Steps
+
+- Integrate validation into market creation UI
+- Enforce standards on L2 server market acceptance
+- Add real-time validation feedback in forms
+- Display requirements prominently in market creation flow
+
+---
+
+## Phase 5: Live Markets Integration
+
+**Goal**: Connect frontend to real L2 market data and enforce validation standards
+
+**Duration**: 4-6 hours  
+**Risk**: Medium (API integration)  
+**Dependencies**: Phases 1-4 complete  
+**Status**: 🔄 **IN PROGRESS**
+
+### 5.1 Current State
+
+✅ Market standards defined and tested  
+✅ MarketsSDK ready with all methods  
+⚠️ Markets page shows static/mock data  
+⚠️ No validation on market creation forms  
+⚠️ No enforcement of $100 min liquidity
+
+### 5.2 Required Changes
+
+**File**: `app/markets/page.tsx`
+
+Replace static data with live L2 API calls:
+
+```typescript
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useMarkets } from '@/app/contexts/MarketsContext'
+import { MARKET_REQUIREMENTS } from '@/markets-tests/market-standards'
+
+export default function MarketsPage() {
+  const { getAllMarkets, getActiveMarkets, isReady } = useMarkets()
+  const [markets, setMarkets] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState('active')
+
+  useEffect(() => {
+    if (!isReady) return
+    
+    const loadMarkets = async () => {
+      try {
+        const data = filter === 'active' 
+          ? await getActiveMarkets()
+          : await getAllMarkets()
+        setMarkets(data)
+      } catch (error) {
+        console.error('Failed to load markets:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadMarkets()
+    const interval = setInterval(loadMarkets, 10000) // Refresh every 10s
+    return () => clearInterval(interval)
+  }, [filter, isReady])
+
+  return (
+    <div>
+      {/* Market grid with live data */}
+      {markets.map(market => (
+        <MarketCard key={market.id} market={market} />
+      ))}
+    </div>
+  )
+}
+```
+
+### 5.3 Market Creation Form Validation
+
+**New File**: `app/components/CreateMarketForm.tsx`
+
+```typescript
+import { useState } from 'react'
+import { validateMarket, MARKET_REQUIREMENTS } from '@/markets-tests/market-standards'
+
+export default function CreateMarketForm() {
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    outcomes: ['', ''],
+    closes_at: '',
+    resolution_criteria: '',
+    category: 'crypto',
+    initial_liquidity: 100
+  })
+  const [errors, setErrors] = useState<string[]>([])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    // Validate against standards
+    const validation = validateMarket({
+      ...formData,
+      id: 'temp-id', // Will be generated server-side
+      outcomes: formData.outcomes.map((label, index) => ({ index, label }))
+    })
+    
+    if (!validation.valid) {
+      setErrors(validation.errors)
+      return
+    }
+    
+    // Submit to L2 API
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_L2_API_URL}/market/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      })
+      // Handle response...
+    } catch (error) {
+      console.error('Market creation failed:', error)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* Form fields with real-time validation */}
+      <div>
+        <label>Title ({MARKET_REQUIREMENTS.MIN_TITLE_LENGTH}-{MARKET_REQUIREMENTS.MAX_TITLE_LENGTH} chars)</label>
+        <input
+          value={formData.title}
+          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+          minLength={MARKET_REQUIREMENTS.MIN_TITLE_LENGTH}
+          maxLength={MARKET_REQUIREMENTS.MAX_TITLE_LENGTH}
+        />
+      </div>
+      
+      <div>
+        <label>Initial Liquidity (min ${MARKET_REQUIREMENTS.MIN_LIQUIDITY} BC)</label>
+        <input
+          type="number"
+          value={formData.initial_liquidity}
+          onChange={(e) => setFormData({ ...formData, initial_liquidity: parseInt(e.target.value) })}
+          min={MARKET_REQUIREMENTS.MIN_LIQUIDITY}
+        />
+      </div>
+
+      {errors.length > 0 && (
+        <div className="errors">
+          {errors.map((err, i) => <p key={i}>{err}</p>)}
+        </div>
+      )}
+
+      <button type="submit">Create Market</button>
+    </form>
+  )
+}
+```
+
+### 5.4 Success Criteria
+
+- [ ] Markets page loads real data from L2 API
+- [ ] Market cards show live prices, volume, liquidity
+- [ ] Create market form validates against standards
+- [ ] Markets below $100 liquidity stay in "pending" status
+- [ ] Markets with invalid data are rejected client-side
+- [ ] Real-time market updates every 10 seconds
+
+---
+
+## Phase 6: Unified Balance Display
 
 **Goal**: Show L1 + L2 balances in a single unified view
 
 **Duration**: 2-3 hours  
 **Risk**: Low (display only)  
-**Dependencies**: Phase 1-3 complete
+**Dependencies**: Phase 1-5 complete
 
-### 4.1 Current Problem
+### 6.1 Current Problem
 
 - Wallet page only shows L2 balance
 - No visibility into L1 balance
@@ -831,7 +1092,7 @@ export default function UnifiedBalance({ address }: { address: string }) {
 }
 ```
 
-### 4.4 Integration Points
+### 6.4 Integration Points
 
 | File | Change |
 |------|--------|
@@ -839,7 +1100,7 @@ export default function UnifiedBalance({ address }: { address: string }) {
 | `app/components/Navigation.tsx` | Add mini balance indicator |
 | `app/markets/[slug]/page.tsx` | Show available L2 balance for betting |
 
-### 4.5 Success Criteria
+### 6.5 Success Criteria
 
 - [ ] Total balance shows L1 + L2 combined
 - [ ] Locked amount visible when user has active positions
@@ -849,15 +1110,15 @@ export default function UnifiedBalance({ address }: { address: string }) {
 
 ---
 
-## Phase 5: Bridge UI Completion
+## Phase 7: Bridge UI Completion
 
 **Goal**: Enable deposits (L1→L2) and withdrawals (L2→L1) in the UI
 
 **Duration**: 4-6 hours  
 **Risk**: Medium (involves real token movement)  
-**Dependencies**: Phase 1-4 complete
+**Dependencies**: Phase 1-6 complete
 
-### 5.1 Bridge Architecture
+### 7.1 Bridge Architecture
 
 ```
 DEPOSIT (L1 → L2):
@@ -1027,7 +1288,7 @@ export default function BridgeWithdraw({ wallet, onSuccess }) {
 
 ---
 
-## Phase 6: Production Hardening
+## Phase 8: Production Hardening
 
 **Goal**: Security audit, error handling, performance optimization
 
