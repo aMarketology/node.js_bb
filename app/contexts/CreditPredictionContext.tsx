@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 import { useAuth } from './AuthContext'
 import { CreditPredictionSDK } from '@/sdk/credit-prediction-actions-sdk.js'
+import { derivePrivateKeyOnDemand } from '@/lib/blackbook-wallet'
 import nacl from 'tweetnacl'
 
 const L2_API = process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234'
@@ -85,7 +86,15 @@ const CreditPredictionContext = createContext<CreditPredictionContextType | unde
 // ═══════════════════════════════════════════════════════════════════════════
 
 export function CreditPredictionProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, activeWallet, user, activeWalletData } = useAuth()
+  const { 
+    isAuthenticated, 
+    activeWallet, 
+    user, 
+    activeWalletData, 
+    vaultSession, 
+    getPassword, 
+    isPasswordUnlocked 
+  } = useAuth()
   
   const [sdk, setSdk] = useState<CreditPredictionSDK | null>(null)
   const [isConnected, setIsConnected] = useState(false)
@@ -94,6 +103,9 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
   const [balance, setBalance] = useState({ available: 0, locked: 0 })
   const [positions, setPositions] = useState<any[]>([])
   const [events, setEvents] = useState<any[]>([])
+  
+  // Track if we need to show password prompt
+  const [needsPasswordPrompt, setNeedsPasswordPrompt] = useState(false)
 
   // Initialize SDK when wallet changes
   useEffect(() => {
@@ -107,22 +119,60 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
       return
     }
 
-    console.log('🔌 Initializing CreditPredictionSDK for:', activeWallet)
+    // Determine wallet type for logging
+    const walletLabel = activeWallet === 'user' ? '👤 User' : 
+                        activeWallet === 'alice' ? '🧪 Alice (Test)' : '🧪 Bob (Test)'
+    console.log(`🔌 Initializing CreditPredictionSDK for: ${walletLabel}`)
 
-    // Create signer function using wallet keys
-    const signer = async (message: string): Promise<string> => {
-      if (!activeWalletData?.privateKey || !activeWalletData?.publicKey) {
-        throw new Error('No wallet keys available')
+    // Create signer function based on wallet type
+    const createSigner = () => {
+      // For user wallet, derive keys on-demand
+      if (activeWallet === 'user' && activeWalletData && 'requiresDerivation' in activeWalletData && activeWalletData.requiresDerivation) {
+        return async (message: string): Promise<string> => {
+          // Check if password is available
+          if (!vaultSession) {
+            throw new Error('No vault session available. Please log in again.')
+          }
+          
+          const password = getPassword()
+          if (!password) {
+            console.log('🔒 Password expired or not set - need to prompt user')
+            setNeedsPasswordPrompt(true)
+            throw new Error('PASSWORD_REQUIRED')
+          }
+          
+          console.log('🔐 Deriving keys on-demand for user wallet...')
+          const { secretKey, publicKey } = await derivePrivateKeyOnDemand(vaultSession, password)
+          
+          // Sign the message
+          const messageBytes = new Uint8Array(Buffer.from(message, 'utf8'))
+          const signature = nacl.sign.detached(messageBytes, secretKey)
+          
+          // CRITICAL: Clear secret key from memory immediately
+          secretKey.fill(0)
+          console.log('🗑️ Secret key cleared from memory')
+          
+          return Buffer.from(signature).toString('hex')
+        }
       }
       
-      const secretKey = new Uint8Array(64)
-      secretKey.set(Buffer.from(activeWalletData.privateKey, 'hex'), 0)
-      secretKey.set(Buffer.from(activeWalletData.publicKey, 'hex'), 32)
-      
-      const messageBytes = new Uint8Array(Buffer.from(message, 'utf8'))
-      const signature = nacl.sign.detached(messageBytes, secretKey)
-      return Buffer.from(signature).toString('hex')
+      // For test wallets (alice/bob), use stored keys
+      return async (message: string): Promise<string> => {
+        if (!activeWalletData?.privateKey || !activeWalletData?.publicKey) {
+          throw new Error('No wallet keys available')
+        }
+        
+        const secretKey = new Uint8Array(64)
+        secretKey.set(Buffer.from(activeWalletData.privateKey, 'hex'), 0)
+        secretKey.set(Buffer.from(activeWalletData.publicKey, 'hex'), 32)
+        
+        const messageBytes = new Uint8Array(Buffer.from(message, 'utf8'))
+        const signature = nacl.sign.detached(messageBytes, secretKey)
+        return Buffer.from(signature).toString('hex')
+      }
     }
+
+    const signer = createSigner()
 
     const newSdk = new CreditPredictionSDK({
       l2Url: L2_API,
@@ -172,7 +222,7 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
       setPositions(positionsData)
       
       // Check for existing credit session
-      const session = await sdkInstance.getCreditSession().catch(() => null)
+      const session = await sdkInstance.getCreditSession().catch(() => null) as CreditSession | null
       setActiveSession(session)
       
       console.log('✅ CreditPredictionSDK initialized:', {
@@ -193,8 +243,8 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
     if (!sdk) return { success: false, message: 'SDK not initialized' }
     
     try {
-      const result = await sdk.openCredit(amount)
-      if (result.success) {
+      const result = await sdk.openCredit(amount) as any
+      if (result?.success) {
         setActiveSession({
           sessionId: result.sessionId!,
           creditAmount: result.creditAmount!,
@@ -203,10 +253,10 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
         })
       }
       return {
-        success: result.success,
-        message: result.message,
-        creditAmount: result.creditAmount,
-        virtualBalance: result.virtualBalance
+        success: result?.success ?? false,
+        message: result?.message ?? 'Unknown error',
+        creditAmount: result?.creditAmount,
+        virtualBalance: result?.virtualBalance
       }
     } catch (error: any) {
       return { success: false, message: error.message }
@@ -217,12 +267,16 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
     if (!sdk) return { success: false, pnl: 0, message: 'SDK not initialized' }
     
     try {
-      const result = await sdk.settleCredit()
-      if (result.success) {
+      const result = await sdk.settleCredit() as any
+      if (result?.success) {
         setActiveSession(null)
         await refreshBalance()
       }
-      return result
+      return {
+        success: result?.success ?? false,
+        pnl: result?.pnl ?? 0,
+        message: result?.message ?? 'Unknown error'
+      }
     } catch (error: any) {
       return { success: false, pnl: 0, message: error.message }
     }
@@ -230,7 +284,7 @@ export function CreditPredictionProvider({ children }: { children: ReactNode }) 
 
   const refreshCreditSession = useCallback(async () => {
     if (!sdk) return
-    const session = await sdk.getCreditSession()
+    const session = await sdk.getCreditSession().catch(() => null) as CreditSession | null
     setActiveSession(session)
   }, [sdk])
 

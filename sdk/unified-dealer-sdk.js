@@ -153,6 +153,31 @@ export class DealerCrypto {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// HELPER: ALPHABETICAL JSON SORTING (Required for L2 Rust serde_json compatibility)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sort object keys alphabetically (recursively) for deterministic JSON serialization.
+ * L2 server uses Rust serde_json which sorts keys alphabetically - we must match.
+ */
+function sortKeysAlphabetically(obj) {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(sortKeysAlphabetically);
+  }
+  
+  const sortedKeys = Object.keys(obj).sort();
+  const result = {};
+  for (const key of sortedKeys) {
+    result[key] = sortKeysAlphabetically(obj[key]);
+  }
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // UNIFIED DEALER SDK
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -236,6 +261,7 @@ export class UnifiedDealerSDK {
 
   /**
    * Create a signed bet request
+   * Note: Payload is alphabetically sorted for L2 Rust serde_json compatibility
    */
   createSignedBetRequest(marketId, outcome, amount, requestPath = "/bet") {
     const timestamp = Date.now();
@@ -247,7 +273,8 @@ export class UnifiedDealerSDK {
       amount: amount,
     };
     
-    const payloadStr = JSON.stringify(payload);
+    // Sort keys alphabetically for deterministic JSON (L2 Rust compatibility)
+    const payloadStr = JSON.stringify(sortKeysAlphabetically(payload));
     const message = `${requestPath}\n${payloadStr}\n${timestamp}\n${nonce}`;
     const signature = this.sign(message, CHAIN_ID_L2);
     
@@ -265,12 +292,14 @@ export class UnifiedDealerSDK {
 
   /**
    * Create a signed generic request
+   * Note: Payload is alphabetically sorted for L2 Rust serde_json compatibility
    */
   createSignedRequest(payload, chainId = CHAIN_ID_L2, requestPath = null) {
     const timestamp = Date.now();
     const nonce = ++this.nonceCounter;
     
-    const payloadStr = JSON.stringify(payload);
+    // Sort keys alphabetically for deterministic JSON (L2 Rust compatibility)
+    const payloadStr = JSON.stringify(sortKeysAlphabetically(payload));
     let message = requestPath 
       ? `${requestPath}\n${payloadStr}\n${timestamp}\n${nonce}`
       : `${payloadStr}\n${timestamp}\n${nonce}`;
@@ -1648,79 +1677,6 @@ export function createDealerSDK(options = {}) {
     address: process.env.DEALER_ADDRESS || ORACLE_ADDRESS,
     ...options,
   });
-}
-
-  /**
-   * Resolve a market and distribute payouts
-   */
-  async resolveMarket(params) {
-    try {
-      const { marketId, winningOutcome, evidence } = params;
-      
-      // Emit market resolution event
-      this.emit({
-        type: 'market_resolved',
-        marketId,
-        winningOutcome,
-        timestamp: Date.now()
-      });
-      
-      const result = await this.l2Post('/dealer/resolve-market', {
-        marketId,
-        winningOutcome,
-        evidence: evidence || 'Market resolved by dealer',
-        dealerAddress: this.address,
-        timestamp: Math.floor(Date.now() / 1000)
-      });
-      
-      // Emit settlement completion event
-      if (result.success) {
-        this.emit({
-          type: 'settlement_completed',
-          marketId,
-          payoutsProcessed: result.payoutsProcessed || 0,
-          timestamp: Date.now()
-        });
-      }
-      
-      return {
-        success: result.success || false,
-        winningOutcome,
-        payoutsProcessed: result.payoutsProcessed || 0,
-        message: result.message
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * L2 HTTP POST helper
-   */
-  async l2Post(path, body) {
-    const res = await fetch(`${this.l2Url}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) throw new Error(`L2 POST failed: ${await res.text()}`);
-    return res.json();
-  }
-
-  /**
-   * L2 HTTP GET helper
-   */
-  async l2Get(path) {
-    const res = await fetch(`${this.l2Url}${path}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    if (!res.ok) throw new Error(`L2 GET failed: ${await res.text()}`);
-    return res.json();
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

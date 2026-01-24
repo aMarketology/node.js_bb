@@ -2,8 +2,12 @@
 // Manages user authentication state and wallet connection
 // Integrated with BlackBook blockchain profiles
 // 
-// SECURITY: Password is stored in memory only for the session.
-// Private keys are NEVER stored - they are derived on-demand for each signing operation.
+// SECURITY MODEL:
+// - Password stored in memory only during active session
+// - 10-minute active session (extends on user activity)
+// - 1-hour inactivity auto-logout
+// - Large transactions (≥$1000) ALWAYS require password
+// - Private keys are NEVER stored - derived on-demand for each signing operation
 
 'use client'
 
@@ -22,6 +26,17 @@ const TEST_WALLETS = {
 
 type ActiveWallet = 'user' | 'alice' | 'bob'
 
+// Wallet data types - supports both test wallets (with keys) and user wallets (keys derived on-demand)
+type TestWalletData = typeof TEST_ACCOUNTS.alice
+type UserWalletData = {
+  l1Address: string
+  l2Address: string
+  publicKey: string | null
+  privateKey: null  // User private keys are NEVER stored
+  requiresDerivation: true  // Flag indicating keys must be derived on-demand
+}
+type WalletData = TestWalletData | UserWalletData | null
+
 interface AuthContextType {
   user: UserProfile | null
   walletAddress: string | null
@@ -29,14 +44,16 @@ interface AuthContextType {
   isKYCVerified: boolean
   loading: boolean
   activeWallet: ActiveWallet
-  activeWalletData: typeof TEST_WALLETS.alice | null
+  activeWalletData: WalletData
   // Vault session for secure signing (no private key stored)
   vaultSession: VaultSession | null
   // Get password for on-demand key derivation (only available in memory)
   getPassword: () => string | null
-  // Check if password is unlocked (within 15-minute window)
+  // Check if password is unlocked (within active session)
   isPasswordUnlocked: () => boolean
-  // Unlock with password (stores for 15 minutes)
+  // Check if password is required for a transaction amount
+  shouldPromptPassword: (amount?: number) => boolean
+  // Unlock with password (starts activity-based session)
   unlockWithPassword: (password: string) => boolean
   signIn: (email: string, password: string) => Promise<boolean>
   signInWithGoogle: () => Promise<boolean>
@@ -60,14 +77,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [vaultSession, setVaultSession] = useState<VaultSession | null>(null)
   
   // Store password in memory only (ref to avoid re-renders)
-  // Password expires after 15 minutes and is cleared on sign out
   // Never persisted to storage
   const passwordRef = useRef<string | null>(null)
   const passwordTimestampRef = useRef<number | null>(null)
-  const passwordTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const sessionTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastActivityRef = useRef<number>(Date.now())
   
-  // 15 minutes in milliseconds
-  const PASSWORD_EXPIRY_MS = 15 * 60 * 1000
+  // Session timing constants
+  const ACTIVE_SESSION_MS = 10 * 60 * 1000   // 10 minutes - extends on activity
+  const INACTIVITY_LOGOUT_MS = 60 * 60 * 1000 // 1 hour - auto logout
+  const LARGE_TX_THRESHOLD = 1000             // $1000 - always requires password
 
   // Initialize auth state
   useEffect(() => {
@@ -84,11 +104,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     })
 
+    // Set up activity listeners for session management
+    const handleActivity = () => trackActivity()
+    window.addEventListener('mousemove', handleActivity)
+    window.addEventListener('keydown', handleActivity)
+    window.addEventListener('click', handleActivity)
+    window.addEventListener('scroll', handleActivity)
+    window.addEventListener('touchstart', handleActivity)
+
     return () => {
       authListener.subscription.unsubscribe()
-      if (passwordTimerRef.current) {
-        clearTimeout(passwordTimerRef.current)
-      }
+      if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current)
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current)
+      window.removeEventListener('mousemove', handleActivity)
+      window.removeEventListener('keydown', handleActivity)
+      window.removeEventListener('click', handleActivity)
+      window.removeEventListener('scroll', handleActivity)
+      window.removeEventListener('touchstart', handleActivity)
     }
   }, [])
 
@@ -118,25 +150,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   /**
-   * Store password in memory for 15 minutes
+   * Track user activity - extends session and resets inactivity timer
+   */
+  function trackActivity() {
+    const now = Date.now()
+    lastActivityRef.current = now
+    
+    // If password is unlocked, extend the active session
+    if (passwordRef.current && passwordTimestampRef.current) {
+      extendSession()
+    }
+    
+    // Reset inactivity logout timer
+    resetInactivityTimer()
+  }
+
+  /**
+   * Extend the active session (called on activity)
+   */
+  function extendSession() {
+    if (!passwordRef.current) return
+    
+    // Update timestamp to extend session
+    passwordTimestampRef.current = Date.now()
+    
+    // Reset session timer
+    if (sessionTimerRef.current) {
+      clearTimeout(sessionTimerRef.current)
+    }
+    
+    sessionTimerRef.current = setTimeout(() => {
+      console.log('🔒 Active session expired after 10 minutes of no activity')
+      clearPassword()
+    }, ACTIVE_SESSION_MS)
+  }
+
+  /**
+   * Reset inactivity logout timer
+   */
+  function resetInactivityTimer() {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current)
+    }
+    
+    // Only set timer if user is logged in
+    if (user) {
+      inactivityTimerRef.current = setTimeout(async () => {
+        console.log('🚪 Auto-logout: 1 hour of inactivity')
+        await signOut()
+      }, INACTIVITY_LOGOUT_MS)
+    }
+  }
+
+  /**
+   * Store password in memory with activity-based expiry
    */
   function storePassword(password: string) {
-    // Clear any existing timer
-    if (passwordTimerRef.current) {
-      clearTimeout(passwordTimerRef.current)
-    }
+    // Clear any existing timers
+    if (sessionTimerRef.current) clearTimeout(sessionTimerRef.current)
     
     // Store password and timestamp
     passwordRef.current = password
     passwordTimestampRef.current = Date.now()
+    lastActivityRef.current = Date.now()
     
-    // Set timer to clear password after 15 minutes
-    passwordTimerRef.current = setTimeout(() => {
-      console.log('🔒 Password expired after 15 minutes - clearing from memory')
+    // Set session timer (10 minutes)
+    sessionTimerRef.current = setTimeout(() => {
+      console.log('🔒 Active session expired - clearing password')
       clearPassword()
-    }, PASSWORD_EXPIRY_MS)
+    }, ACTIVE_SESSION_MS)
     
-    console.log('🔑 Password stored in memory for 15 minutes')
+    console.log('🔑 Password stored - 10-minute active session started')
   }
 
   /**
@@ -145,14 +229,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function clearPassword() {
     passwordRef.current = null
     passwordTimestampRef.current = null
-    if (passwordTimerRef.current) {
-      clearTimeout(passwordTimerRef.current)
-      passwordTimerRef.current = null
+    if (sessionTimerRef.current) {
+      clearTimeout(sessionTimerRef.current)
+      sessionTimerRef.current = null
     }
   }
 
   /**
-   * Check if password is still valid (within 15-minute window)
+   * Check if password is still valid (within active session window)
    */
   function isPasswordUnlocked(): boolean {
     if (!passwordRef.current || !passwordTimestampRef.current) {
@@ -160,10 +244,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     
     const elapsed = Date.now() - passwordTimestampRef.current
-    const isValid = elapsed < PASSWORD_EXPIRY_MS
+    const isValid = elapsed < ACTIVE_SESSION_MS
     
     if (!isValid) {
-      console.log('🔒 Password expired - clearing from memory')
+      console.log('🔒 Session expired - clearing password')
       clearPassword()
     }
     
@@ -171,7 +255,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   /**
-   * Unlock with password - stores for 15 minutes
+   * Check if password is required for a transaction
+   * @param amount - Transaction amount in dollars
+   * @returns true if password prompt is needed
+   */
+  function shouldPromptPassword(amount: number = 0): boolean {
+    // Large transactions ALWAYS require password
+    if (amount >= LARGE_TX_THRESHOLD) {
+      console.log(`💰 Large transaction ($${amount}) - password required`)
+      return true
+    }
+    
+    // For normal transactions, check if session is active
+    return !isPasswordUnlocked()
+  }
+
+  /**
+   * Unlock with password - starts activity-based session
    * Returns true if successful
    */
   function unlockWithPassword(password: string): boolean {
@@ -181,10 +281,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   /**
-   * Get password if still valid
+   * Get password if session is still active
    */
   function getPassword(): string | null {
     if (isPasswordUnlocked()) {
+      // Extend session on password use
+      extendSession()
       return passwordRef.current
     }
     return null
@@ -380,8 +482,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null // User's private key is derived on-demand, never stored
   }
 
-  const activeWalletData = activeWallet === 'alice' ? TEST_WALLETS.alice : 
-                           activeWallet === 'bob' ? TEST_WALLETS.bob : null
+  const activeWalletData: WalletData = activeWallet === 'alice' ? TEST_WALLETS.alice : 
+                           activeWallet === 'bob' ? TEST_WALLETS.bob : 
+                           activeWallet === 'user' && user?.blackbook_address ? {
+                             // User wallet data (keys derived on-demand, not stored here)
+                             l1Address: user.blackbook_address,
+                             l2Address: user.blackbook_address.replace('L1_', 'L2_'),
+                             publicKey: vaultSession?.publicKey || null,
+                             privateKey: null, // NEVER stored - derived on-demand via derivePrivateKeyOnDemand()
+                             // Flag to indicate keys must be derived
+                             requiresDerivation: true as const
+                           } : null
 
   const value: AuthContextType = {
     user,
@@ -394,6 +505,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     vaultSession,
     getPassword,
     isPasswordUnlocked,
+    shouldPromptPassword,
     unlockWithPassword,
     signIn,
     signInWithGoogle,

@@ -100,10 +100,33 @@ export class CreditPredictionSDK {
     return `${Date.now()}_${++this._nonceCounter}_${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  /**
+   * Recursively sort object keys alphabetically.
+   * CRITICAL: L2 Rust server uses serde_json which serializes keys alphabetically.
+   * Frontend MUST match this format for signature verification to pass.
+   * 
+   * @param {any} obj - Object to sort
+   * @returns {any} Object with keys sorted alphabetically (recursive)
+   */
+  sortKeysAlphabetically(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj;
+    if (Array.isArray(obj)) return obj.map(item => this.sortKeysAlphabetically(item));
+    
+    return Object.keys(obj)
+      .sort()
+      .reduce((sorted, key) => {
+        sorted[key] = this.sortKeysAlphabetically(obj[key]);
+        return sorted;
+      }, {});
+  }
+
   async signTransaction(tx) {
-    const message = JSON.stringify(tx);
+    // CRITICAL: Sort keys alphabetically before signing (L2 Rust server compatibility)
+    const sortedTx = this.sortKeysAlphabetically(tx);
+    const message = JSON.stringify(sortedTx);
+    console.log('📝 Signing transaction (alphabetically sorted):', message.substring(0, 100) + '...');
     const signature = await this.signer(message);
-    return { tx, signature, signer: this.address };
+    return { tx: sortedTx, signature, signer: this.address };
   }
 
   /**
@@ -120,13 +143,16 @@ export class CreditPredictionSDK {
     const timestamp = Math.floor(Date.now() / 1000);
     const nonce = this.generateNonce();
     
-    const message = JSON.stringify({
+    // CRITICAL: Sort keys alphabetically before signing (L2 Rust server compatibility)
+    const messageObj = this.sortKeysAlphabetically({
       action: payload.action || 'dealer_operation',
       timestamp,
       nonce,
       payload
     });
     
+    const message = JSON.stringify(messageObj);
+    console.log('📝 Signing dealer message (alphabetically sorted):', message.substring(0, 100) + '...');
     const signature = await this.signer(message);
     
     return {

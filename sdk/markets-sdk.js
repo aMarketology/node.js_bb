@@ -73,6 +73,23 @@ export class MarketsSDK {
     this.signer = config.signer;
   }
 
+  /**
+   * Recursively sort object keys alphabetically.
+   * CRITICAL: L2 Rust server uses serde_json which serializes keys alphabetically.
+   * Frontend MUST match this format for signature verification to pass.
+   */
+  sortKeysAlphabetically(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj;
+    if (Array.isArray(obj)) return obj.map(item => this.sortKeysAlphabetically(item));
+    
+    return Object.keys(obj)
+      .sort()
+      .reduce((sorted, key) => {
+        sorted[key] = this.sortKeysAlphabetically(obj[key]);
+        return sorted;
+      }, {});
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // LOAD MARKETS FROM L2 (Server-side filtered)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -304,8 +321,10 @@ export class MarketsSDK {
       timestamp: Date.now()
     };
     
-    const signature = await this.signer(JSON.stringify(tx));
-    const signed = { tx, signature, signer: this.address };
+    // CRITICAL: Sort keys alphabetically before signing (L2 Rust server compatibility)
+    const sortedTx = this.sortKeysAlphabetically(tx);
+    const signature = await this.signer(JSON.stringify(sortedTx));
+    const signed = { tx: sortedTx, signature, signer: this.address };
     
     const res = await this.l2Post('/cpmm/buy', signed);
     
@@ -341,8 +360,10 @@ export class MarketsSDK {
       timestamp: Date.now()
     };
     
-    const signature = await this.signer(JSON.stringify(tx));
-    const signed = { tx, signature, signer: this.address };
+    // CRITICAL: Sort keys alphabetically before signing (L2 Rust server compatibility)
+    const sortedTx = this.sortKeysAlphabetically(tx);
+    const signature = await this.signer(JSON.stringify(sortedTx));
+    const signed = { tx: sortedTx, signature, signer: this.address };
     
     const res = await this.l2Post('/cpmm/sell', signed);
     
