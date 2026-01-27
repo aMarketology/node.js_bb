@@ -5,6 +5,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const L1_API_URL = process.env.NEXT_PUBLIC_L1_API_URL || 'http://localhost:8080'
 
+console.log('🔧 L1 Proxy configured with API URL:', L1_API_URL)
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
   const endpoint = searchParams.get('endpoint')
@@ -15,7 +17,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const url = `${L1_API_URL}${endpoint}`
-    console.log('🔄 Proxying L1 request:', url)
+    console.log('🔄 Proxying L1 GET request to:', url)
     
     const response = await fetch(url, {
       headers: {
@@ -23,11 +25,29 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    console.log('📡 L1 response status:', response.status, 'for', url)
+
     // Check if response is ok
     if (!response.ok) {
-      console.error('❌ L1 API returned non-OK status:', response.status)
+      console.error('❌ L1 API returned non-OK status:', response.status, 'URL:', url)
+      
+      // Try to get error details from response
+      let errorDetails = 'No details available'
+      try {
+        const errorText = await response.text()
+        errorDetails = errorText.substring(0, 500)
+      } catch (e) {
+        // Ignore error reading body
+      }
+      
       return NextResponse.json(
-        { error: 'L1 API error', status: response.status },
+        { 
+          error: 'L1 API error', 
+          status: response.status,
+          url: url,
+          details: errorDetails,
+          suggestion: 'Check if L1 server is running at ' + L1_API_URL
+        },
         { status: response.status }
       )
     }

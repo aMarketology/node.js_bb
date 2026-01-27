@@ -48,8 +48,8 @@ export default function Home() {
     <div className="min-h-screen bg-dark">
       <Navigation />
 
-      {/* Hero Section - FIFA-inspired */}
-      <section className="relative h-screen flex items-center justify-center overflow-hidden">
+      {/* Hero Section - FIFA-inspired - pulls up over nav spacer for full-bleed effect */}
+      <section className="relative h-screen flex items-center justify-center overflow-hidden -mt-28">
         {/* Animated Background */}
         <div className="absolute inset-0 bg-gradient-to-br from-prism-purple via-dark to-prism-teal opacity-40" />
         <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10" />

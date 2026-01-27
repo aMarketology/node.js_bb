@@ -147,7 +147,55 @@ export async function POST(req: NextRequest) {
     }
 
     // ========================================
-    // 9. Create entry with timestamp proof
+    // 9. CRITICAL: Deduct Fan Credit Balance
+    // ========================================
+    // Check user's Fan Credit balance first
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('fan_gold_balance, id')
+      .eq('id', user_id)
+      .single()
+
+    if (profileError || !profile) {
+      return NextResponse.json({
+        error: 'USER_NOT_FOUND',
+        message: 'User profile not found'
+      }, { status: 404 })
+    }
+
+    const currentBalance = profile.fan_gold_balance || 0
+    
+    if (currentBalance < entry_fee) {
+      return NextResponse.json({
+        error: 'INSUFFICIENT_BALANCE',
+        message: 'Insufficient Fan Credit balance',
+        details: {
+          required: entry_fee,
+          current_balance: currentBalance,
+          shortfall: entry_fee - currentBalance
+        }
+      }, { status: 400 })
+    }
+
+    // Deduct entry fee from user's balance
+    const newBalance = currentBalance - entry_fee
+    const { error: balanceError } = await supabase
+      .from('profiles')
+      .update({ fan_gold_balance: newBalance })
+      .eq('id', user_id)
+
+    if (balanceError) {
+      console.error('[PRISM Entry] Failed to deduct balance:', balanceError)
+      return NextResponse.json({
+        error: 'BALANCE_DEDUCTION_FAILED',
+        message: 'Failed to deduct entry fee from balance'
+      }, { status: 500 })
+    }
+
+    console.log(`[PRISM Entry] Deducted ${entry_fee} FC from user ${user_id} (${currentBalance} → ${newBalance} FC)`)
+
+    // ========================================
+    // 10. Create entry with timestamp proof
     // ========================================
     const { data: entry, error: entryError } = await supabase
       .from('prism_entries')
@@ -173,7 +221,8 @@ export async function POST(req: NextRequest) {
     }
 
     // ========================================
-    // 10. Increment contest entry count
+    // ========================================
+    // 11. Increment contest entry count
     // ========================================
     await supabase
       .from('prism')
@@ -181,7 +230,7 @@ export async function POST(req: NextRequest) {
       .eq('id', contest_id)
 
     // ========================================
-    // 11. Return success with timing info
+    // 12. Return success with timing info + balance
     // ========================================
     const timeUntilLock = effectiveLockTime - nowUnix
     
@@ -194,6 +243,11 @@ export async function POST(req: NextRequest) {
         picks: entry.picks,
         entry_timestamp: entry.entry_timestamp,
         created_at: entry.created_at
+      },
+      balance: {
+        previous: currentBalance,
+        deducted: entry_fee,
+        new: newBalance
       },
       timing: {
         entry_timestamp: nowUnix,

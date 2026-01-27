@@ -6,10 +6,9 @@ import { motion } from 'framer-motion'
 import { useAuth } from '@/app/contexts/AuthContext'
 import { useFractal } from '@/app/contexts/FractalContext'
 import { useWallet } from '@/app/contexts/UnifiedWalletContext'
-import { useMode } from './ModeToggle'
 import { formatAddress } from '@/lib/blockchain'
+import { supabase } from '@/lib/supabase'
 import AuthModal from './AuthModal'
-import ModeToggle, { BalanceDisplay } from './ModeToggle'
 
 export default function Navigation() {
   const { user, walletAddress, isAuthenticated, isKYCVerified, signOut, activeWallet, switchWallet } = useAuth()
@@ -20,6 +19,37 @@ export default function Navigation() {
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showWalletMenu, setShowWalletMenu] = useState(false)
   const [grayscaleMode, setGrayscaleMode] = useState(false)
+  const [prismHue, setPrismHue] = useState(0) // Continuous hue rotation
+  const [prismPlaying, setPrismPlaying] = useState(true) // Auto-play by default
+  const [fanCoinBalance, setFanCoinBalance] = useState<number>(0)
+
+  // Fetch real Fan Coin balance from Supabase
+  useEffect(() => {
+    async function fetchBalance() {
+      if (!user?.id) return
+      const { data } = await supabase
+        .from('profiles')
+        .select('fan_gold_balance')
+        .eq('id', user.id)
+        .single()
+      if (data?.fan_gold_balance !== undefined) {
+        setFanCoinBalance(data.fan_gold_balance)
+      }
+    }
+    fetchBalance()
+  }, [user?.id])
+
+  // Get display name for current hue range
+  const getHueName = (hue: number) => {
+    if (hue < 30) return 'Ruby'
+    if (hue < 60) return 'Amber'
+    if (hue < 150) return 'Teal'  // We skip 60-120, so this is after the jump
+    if (hue < 200) return 'Cyan'
+    if (hue < 260) return 'Sapphire'
+    if (hue < 300) return 'Violet'
+    if (hue < 340) return 'Magenta'
+    return 'Rose'
+  }
 
   useEffect(() => {
     const handleScroll = () => {
@@ -29,22 +59,49 @@ export default function Navigation() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
-  // Apply grayscale to wrapper (excludes fractal particles at body level)
+  // Apply grayscale and prism hue to wrapper (excludes fractal particles at body level)
   useEffect(() => {
     const wrapper = document.getElementById('grayscale-wrapper')
     if (wrapper) {
-      if (grayscaleMode) {
-        wrapper.style.filter = 'grayscale(1)'
-      } else {
-        wrapper.style.filter = 'none'
+      const filters = []
+      if (grayscaleMode) filters.push('grayscale(1)')
+      if (prismHue > 0) {
+        filters.push(`hue-rotate(${prismHue}deg)`)
+        filters.push('saturate(1.15)') // Slight saturation boost for vibrancy
+        filters.push('brightness(1.05)') // Slight brightness for pop
       }
+      wrapper.style.filter = filters.length > 0 ? filters.join(' ') : 'none'
+      wrapper.style.transition = 'filter 0.1s linear' // Smooth continuous transition
     }
     return () => {
       if (wrapper) {
         wrapper.style.filter = 'none'
       }
     }
-  }, [grayscaleMode])
+  }, [grayscaleMode, prismHue])
+
+  // Auto-cycle prism hue smoothly when playing (skips green-orange range 60-150)
+  useEffect(() => {
+    if (!prismPlaying) return
+    
+    const interval = setInterval(() => {
+      setPrismHue(prev => {
+        let next = (prev + 0.5) % 360 // Slow smooth rotation
+        // Skip the green-orange muddy zone (60-150 degrees)
+        if (next >= 60 && next < 150) {
+          next = 150
+        }
+        return next
+      })
+    }, 50) // 50ms for buttery smooth animation
+    
+    return () => clearInterval(interval)
+  }, [prismPlaying])
+
+  // Toggle prism play/pause
+  const togglePrism = () => {
+    setPrismPlaying(prev => !prev)
+  }
 
   return (
     <>
@@ -110,12 +167,10 @@ export default function Navigation() {
               </motion.div>
             </Link>
 
-            {/* Mode Toggle - Center Prominence */}
-            <div className="flex-1 flex justify-center">
-              <ModeToggle />
-            </div>
+            {/* Spacer for center alignment */}
+            <div className="flex-1" />
 
-            {/* Fractal Toggle */}
+            {/* Fractal Toggle */}}
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -160,12 +215,78 @@ export default function Navigation() {
               </div>
             </motion.button>
 
+            {/* Prism Color Shift Toggle */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={togglePrism}
+              className={`ml-2 p-2 rounded-lg bg-dark-200 border transition-colors relative group ${prismPlaying ? 'border-purple-500 shadow-lg shadow-purple-500/20' : 'border-dark-border hover:border-purple-400'}`}
+              title={prismPlaying ? 'Pause Prism' : 'Play Prism'}
+            >
+              <div 
+                className="w-5 h-5 rounded flex items-center justify-center overflow-hidden"
+                style={{
+                  background: 'conic-gradient(from 0deg, #FF4757, #FF6B35, #FFD700, #00CED1, #3B82F6, #8B5CF6, #EC4899, #FF4757)',
+                  transform: `rotate(${prismHue}deg)`,
+                  transition: 'transform 0.1s linear',
+                }}
+              >
+                {prismPlaying ? (
+                  <motion.div 
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                    className="w-2 h-2 bg-white rounded-full shadow-lg" 
+                  />
+                ) : (
+                  <div className="w-2 h-2 bg-white/70 rounded-sm shadow-lg" />
+                )}
+              </div>
+              {/* Tooltip */}
+              <div className="absolute left-0 top-full mt-2 px-3 py-1 bg-dark-200 border border-dark-border rounded text-xs text-gray-300 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                {prismPlaying ? `🌈 ${getHueName(prismHue)}` : `⏸️ ${getHueName(prismHue)}`}
+              </div>
+            </motion.button>
+
             {/* Desktop Menu */}
             <div className="hidden md:flex items-center gap-4">
-              {/* Balance Display */}
+              {/* Balance Display - Fan Coins + BlackBook with Prism Slider */}
               {isAuthenticated && (
-                <div className="mr-4">
-                  <BalanceDisplay />
+                <div className="flex items-center gap-3 mr-2">
+                  {/* Fan Coins */}
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/30">
+                    <span className="text-lg">🪙</span>
+                    <div className="text-sm">
+                      <span className="text-gray-400">Fan Coins</span>
+                      <span className="ml-2 font-bold text-purple-300">{fanCoinBalance.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  
+                  {/* BlackBook Balance with Prism Color Slider */}
+                  <div className="relative flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-yellow-500/10 to-amber-500/10 border border-yellow-500/30 group">
+                    <span className="text-lg">📖</span>
+                    <div className="text-sm">
+                      <span className="text-gray-400">BlackBook</span>
+                      <span className="ml-2 font-bold text-yellow-300">{l2Balance.available.toLocaleString()} $BB</span>
+                    </div>
+                    {/* Prism Color Touch Slider */}
+                    <div className="ml-2 relative">
+                      <input
+                        type="range"
+                        min="0"
+                        max="360"
+                        value={prismHue}
+                        onChange={(e) => {
+                          setPrismHue(Number(e.target.value))
+                          setPrismPlaying(false)
+                        }}
+                        className="w-12 h-3 rounded-full appearance-none cursor-pointer"
+                        style={{
+                          background: 'linear-gradient(to right, #FF4757, #FF6B35, #FFD700, #00CED1, #3B82F6, #8B5CF6, #EC4899, #FF4757)',
+                        }}
+                        title="Drag to change colors"
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
               
@@ -343,6 +464,9 @@ export default function Navigation() {
         </div>
         </div>
       </motion.nav>
+
+      {/* Spacer to prevent content from being hidden under fixed header */}
+      <div className="h-28" />
 
       {/* Auth Modal */}
       <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
