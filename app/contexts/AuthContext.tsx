@@ -11,7 +11,7 @@
 
 'use client'
 
-import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useRef, useMemo, ReactNode } from 'react'
 import { supabase, signInWithWallet, signInWithEmail, signUpWithEmail, signOut as supabaseSignOut, getUserProfile, getProfileByWallet, getWalletVault, type UserProfile } from '@/lib/supabase'
 import { prismBlockchain } from '@/lib/blockchain'
 import { TEST_ACCOUNTS } from '@/lib/test-accounts'
@@ -22,9 +22,10 @@ import { signInWithGoogle as googleSignIn, handleGoogleCallback } from '@/lib/go
 const TEST_WALLETS = {
   alice: TEST_ACCOUNTS.alice,
   bob: TEST_ACCOUNTS.bob,
+  mac: TEST_ACCOUNTS.mac,
 }
 
-type ActiveWallet = 'user' | 'alice' | 'bob'
+type ActiveWallet = 'user' | 'alice' | 'bob' | 'mac'
 
 // Wallet data types - supports both test wallets (with keys) and user wallets (keys derived on-demand)
 type TestWalletData = typeof TEST_ACCOUNTS.alice
@@ -465,6 +466,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setWalletAddress(TEST_WALLETS.alice.l1Address)
     } else if (wallet === 'bob') {
       setWalletAddress(TEST_WALLETS.bob.l1Address)
+    } else if (wallet === 'mac') {
+      setWalletAddress(TEST_WALLETS.mac.l1Address)
     } else if (user) {
       setWalletAddress(user.blackbook_address || null)
     }
@@ -473,26 +476,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function getActiveAddress(): string | null {
     if (activeWallet === 'alice') return TEST_WALLETS.alice.l1Address
     if (activeWallet === 'bob') return TEST_WALLETS.bob.l1Address
+    if (activeWallet === 'mac') return TEST_WALLETS.mac.l1Address
     return user?.blackbook_address || walletAddress
   }
 
   function getActivePrivateKey(): string | null {
     if (activeWallet === 'alice') return TEST_WALLETS.alice.privateKey
     if (activeWallet === 'bob') return TEST_WALLETS.bob.privateKey
+    if (activeWallet === 'mac') return null // Mac uses vault-encrypted keys
     return null // User's private key is derived on-demand, never stored
   }
 
-  const activeWalletData: WalletData = activeWallet === 'alice' ? TEST_WALLETS.alice : 
-                           activeWallet === 'bob' ? TEST_WALLETS.bob : 
-                           activeWallet === 'user' && user?.blackbook_address ? {
-                             // User wallet data (keys derived on-demand, not stored here)
-                             l1Address: user.blackbook_address,
-                             l2Address: user.blackbook_address.replace('L1_', 'L2_'),
-                             publicKey: vaultSession?.publicKey || null,
-                             privateKey: null, // NEVER stored - derived on-demand via derivePrivateKeyOnDemand()
-                             // Flag to indicate keys must be derived
-                             requiresDerivation: true as const
-                           } : null
+  const activeWalletData: WalletData = useMemo(() => {
+    if (activeWallet === 'alice') return TEST_WALLETS.alice
+    if (activeWallet === 'bob') return TEST_WALLETS.bob
+    if (activeWallet === 'mac') return TEST_WALLETS.mac
+    if (activeWallet === 'user' && user?.blackbook_address) {
+      return {
+        // User wallet data (keys derived on-demand, not stored here)
+        l1Address: user.blackbook_address,
+        l2Address: user.blackbook_address.replace('L1_', 'L2_'),
+        publicKey: vaultSession?.publicKey || null,
+        privateKey: null, // NEVER stored - derived on-demand via derivePrivateKeyOnDemand()
+        // Flag to indicate keys must be derived
+        requiresDerivation: true as const
+      }
+    }
+    return null
+  }, [activeWallet, user?.blackbook_address, vaultSession?.publicKey])
 
   const value: AuthContextType = {
     user,

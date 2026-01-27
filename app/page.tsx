@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import Link from 'next/link'
 import Navigation from './components/Navigation'
 import Footer from './components/Footer'
@@ -15,447 +15,360 @@ interface Market {
   outcomes: string[]
   status: string
   totalVolume: number
-  betCount: number
-  category: string
-  bettingClosesAt?: string
   prices?: number[]
-  hasLiquidity?: boolean
-  liquidity?: number
 }
 
 export default function Home() {
-  const [markets, setMarkets] = useState<Market[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [activeCategory, setActiveCategory] = useState('All')
-  const [statusFilter, setStatusFilter] = useState('All')
-  const [searchQuery, setSearchQuery] = useState('')
   const [featuredMarkets, setFeaturedMarkets] = useState<Market[]>([])
-  const [statusCounts, setStatusCounts] = useState({ pending: 0, active: 0, frozen: 0, resolved: 0 })
-
-  const categories = ['All', 'Sports', 'Politics', 'Crypto', 'Entertainment', 'Science']
-  const statusFilters = ['All', 'Active', 'Pending', 'Frozen', 'Resolved']
+  const [stats, setStats] = useState({ totalMarkets: 0, totalVolume: 0, activeUsers: 0 })
 
   useEffect(() => {
-    loadMarkets()
-  }, [activeCategory, statusFilter])
+    loadData()
+  }, [])
 
-  async function loadMarkets() {
-    setLoading(true)
-    setError(null)
+  async function loadData() {
     try {
-      // Fetch markets directly from L2 API (no auth needed for viewing)
       const response = await fetch(`${L2_API}/markets`)
-      if (!response.ok) {
-        throw new Error(`Failed to fetch markets: ${response.status}`)
+      if (response.ok) {
+        const data = await response.json()
+        const markets = data.markets || []
+        setFeaturedMarkets(markets.slice(0, 3))
+        setStats({
+          totalMarkets: markets.length,
+          totalVolume: markets.reduce((sum: number, m: any) => sum + (m.total_volume || 0), 0),
+          activeUsers: 1234 // Mock data
+        })
       }
-      
-      const data = await response.json()
-      let allMarkets = data.markets || []
-      
-      // Calculate status counts from all markets
-      const pending = allMarkets.filter((m: any) => m.status === 'pending')
-      const active = allMarkets.filter((m: any) => m.status === 'active')
-      const frozen = allMarkets.filter((m: any) => m.status === 'frozen')
-      const resolved = allMarkets.filter((m: any) => m.status === 'resolved')
-      
-      setStatusCounts({
-        pending: pending.length,
-        active: active.length,
-        frozen: frozen.length,
-        resolved: resolved.length
-      })
-      
-      // Filter by status
-      if (statusFilter === 'Pending') {
-        allMarkets = pending
-      } else if (statusFilter === 'Active') {
-        allMarkets = active
-      } else if (statusFilter === 'Frozen') {
-        allMarkets = frozen
-      } else if (statusFilter === 'Resolved') {
-        allMarkets = resolved
-      }
-      // 'All' shows everything
-      
-      // Filter by category if needed
-      if (activeCategory !== 'All') {
-        allMarkets = allMarkets.filter((m: any) => 
-          m.category?.toLowerCase() === activeCategory.toLowerCase()
-        )
-      }
-      
-      // Format for display
-      const formatted = allMarkets.map((m: any) => ({
-        id: m.id || m.market_id,
-        title: m.title,
-        description: m.description || '',
-        outcomes: m.options || m.outcomes || [],
-        status: m.status || 'pending',
-        totalVolume: m.total_volume || m.totalVolume || 0,
-        betCount: m.bet_count || m.betCount || 0,
-        category: m.category || 'Other',
-        bettingClosesAt: m.closes_at,
-        prices: m.prices || m.current_prices || [],
-        hasLiquidity: (m.cpmm_pool?.total_liquidity || 0) > 0,
-        liquidity: m.cpmm_pool?.total_liquidity || 0
-      }))
-      
-      setMarkets(formatted)
-      
-      // Set featured markets (top active by volume)
-      const featuredActive = active
-        .sort((a: any, b: any) => (b.total_volume || 0) - (a.total_volume || 0))
-        .slice(0, 3)
-      
-      setFeaturedMarkets(featuredActive.map((m: any) => ({
-        id: m.id || m.market_id,
-        title: m.title,
-        description: m.description || '',
-        outcomes: m.options || m.outcomes || [],
-        status: m.status || 'active',
-        totalVolume: m.total_volume || 0,
-        betCount: m.bet_count || 0,
-        category: m.category || 'Other',
-        bettingClosesAt: m.closes_at,
-        prices: m.prices || m.current_prices || [],
-        hasLiquidity: (m.cpmm_pool?.total_liquidity || 0) > 0,
-        liquidity: m.cpmm_pool?.total_liquidity || 0
-      })))
-      
-      console.log('✅ Loaded markets from L2:', { 
-        total: allMarkets.length,
-        pending: pending.length, 
-        active: active.length, 
-        frozen: frozen.length, 
-        resolved: resolved.length 
-      })
-    } catch (err: any) {
-      console.error('Failed to load markets:', err)
-      setError(`Cannot connect to Layer 2 server at ${L2_API}`)
-      setMarkets([])
-    } finally {
-      setLoading(false)
+    } catch (error) {
+      console.error('Failed to load markets:', error)
     }
   }
-
-  const filteredMarkets = markets.filter(m => {
-    // Search filter
-    const matchesSearch = searchQuery === '' || 
-      m.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.description.toLowerCase().includes(searchQuery.toLowerCase())
-    
-    // Status filter
-    const matchesStatus = statusFilter === 'All' || 
-      m.status.toLowerCase() === statusFilter.toLowerCase()
-    
-    return matchesSearch && matchesStatus
-  })
 
   return (
     <div className="min-h-screen bg-dark">
       <Navigation />
 
-      {/* === HERO SECTION === */}
-      <section className="relative py-16 overflow-hidden border-b border-dark-border">
-        {/* Subtle Background Orbs */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="prism-orb prism-orb-teal w-[400px] h-[400px] -top-32 -right-32 opacity-20" />
-          <div className="prism-orb prism-orb-purple w-[300px] h-[300px] -bottom-24 -left-24 opacity-20" />
-        </div>
+      {/* Hero Section - FIFA-inspired */}
+      <section className="relative h-screen flex items-center justify-center overflow-hidden">
+        {/* Animated Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-prism-purple via-dark to-prism-teal opacity-40" />
+        <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10" />
+        
+        {/* Floating Orbs */}
+        <motion.div
+          animate={{ y: [0, -20, 0], opacity: [0.3, 0.6, 0.3] }}
+          transition={{ duration: 8, repeat: Infinity }}
+          className="absolute top-20 left-20 w-96 h-96 bg-prism-teal rounded-full blur-3xl"
+        />
+        <motion.div
+          animate={{ y: [0, 20, 0], opacity: [0.3, 0.6, 0.3] }}
+          transition={{ duration: 10, repeat: Infinity }}
+          className="absolute bottom-20 right-20 w-96 h-96 bg-prism-purple rounded-full blur-3xl"
+        />
 
-        <div className="relative z-10 max-w-7xl mx-auto px-6">
-          <div className="text-center space-y-6">
-            <h1 className="text-5xl md:text-6xl font-black">
-              <span className="prism-gradient-text">Prism</span>
-              <span className="text-white"> Markets</span>
+        {/* Hero Content */}
+        <div className="relative z-10 container mx-auto px-6 text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            <h1 className="text-7xl md:text-8xl font-black text-white mb-6 leading-tight">
+              FIFA WORLD CUP<br />
+              <span className="bg-gradient-to-r from-prism-teal via-prism-purple to-prism-teal bg-clip-text text-transparent">
+                2026 FANTASY LEAGUE
+              </span>
             </h1>
-            <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-              Trade on real-world events with complete transparency and instant settlement
+            <p className="text-2xl text-gray-300 mb-8 max-w-3xl mx-auto">
+              Social Gaming Platform • Free Sweepstakes Entries • Skill-Based Contests
+            </p>
+            <p className="text-lg text-gray-400 mb-12 max-w-2xl mx-auto">
+              Build your champion roster, compete against real players, and win with FREE sweepstakes entries. Buy virtual currency, get bonus entries — 100% legal entertainment.
             </p>
             
-            {/* Market Stats Overview */}
-            <div className="flex justify-center gap-6 mt-8">
-              <div className="prism-card px-6 py-3 rounded-lg">
-                <div className="text-sm text-gray-400">Active Markets</div>
-                <div className="text-2xl font-bold text-prism-teal">{statusCounts.active}</div>
-              </div>
-              <div className="prism-card px-6 py-3 rounded-lg">
-                <div className="text-sm text-gray-400">Pending</div>
-                <div className="text-2xl font-bold text-yellow-500">{statusCounts.pending}</div>
-              </div>
-              <div className="prism-card px-6 py-3 rounded-lg">
-                <div className="text-sm text-gray-400">Frozen</div>
-                <div className="text-2xl font-bold text-blue-400">{statusCounts.frozen}</div>
-              </div>
+            <div className="flex gap-6 justify-center">
+              <Link href="/get-started">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="px-12 py-4 bg-gradient-to-r from-prism-teal to-prism-purple text-white text-lg font-bold rounded-full shadow-2xl hover:shadow-prism-teal/50 transition-all"
+                >
+                  GET FREE ENTRIES 🎁
+                </motion.button>
+              </Link>
+              <Link href="/markets">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="px-12 py-4 bg-white/10 backdrop-blur-sm text-white text-lg font-bold rounded-full border-2 border-white/30 hover:bg-white/20 transition-all"
+                >
+                  BROWSE CONTESTS
+                </motion.button>
+              </Link>
             </div>
+          </motion.div>
 
-            {/* Search Bar */}
-            <div className="max-w-2xl mx-auto">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Search markets..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full px-6 py-4 bg-dark-200 border border-dark-border rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-prism-teal transition-colors"
-                />
-                <svg className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
+          {/* Scroll Indicator */}
+          <motion.div
+            animate={{ y: [0, 10, 0] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="absolute bottom-12 left-1/2 transform -translate-x-1/2"
+          >
+            <div className="flex flex-col items-center text-gray-400">
+              <span className="text-sm mb-2">SCROLL TO EXPLORE</span>
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* Stats Bar */}
+      <section className="py-16 bg-dark-lighter border-y border-gray-800">
+        <div className="container mx-auto px-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+            >
+              <div className="text-5xl font-black bg-gradient-to-r from-prism-teal to-prism-purple bg-clip-text text-transparent mb-2">
+                {stats.totalMarkets}+
+              </div>
+              <div className="text-gray-400 text-lg">Live Contests</div>
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.1 }}
+            >
+              <div className="text-5xl font-black bg-gradient-to-r from-prism-teal to-prism-purple bg-clip-text text-transparent mb-2">
+                ${(stats.totalVolume / 1000).toFixed(0)}K+
+              </div>
+              <div className="text-gray-400 text-lg">Prize Pool</div>
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.2 }}
+            >
+              <div className="text-5xl font-black bg-gradient-to-r from-prism-teal to-prism-purple bg-clip-text text-transparent mb-2">
+                {stats.activeUsers}+
+              </div>
+              <div className="text-gray-400 text-lg">Active Players</div>
+            </motion.div>
           </div>
         </div>
       </section>
 
-      {/* === CATEGORY FILTERS === */}
-      <section className="relative py-8 border-b border-dark-border">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-400 mb-2">Category</h3>
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {categories.map((category) => (
-                  <button
-                    key={category}
-                    onClick={() => setActiveCategory(category)}
-                    className={`px-6 py-2 rounded-full font-semibold whitespace-nowrap transition-all ${
-                      activeCategory === category
-                        ? 'bg-prism-teal text-dark border-2 border-prism-teal'
-                        : 'bg-dark-200 text-gray-400 border-2 border-dark-border hover:border-prism-teal/50'
-                    }`}
-                  >
-                    {category}
-                  </button>
-                ))}
+      {/* Legal Clarity Banner */}
+      <section className="py-8 bg-gradient-to-r from-yellow-500/10 via-green-500/10 to-blue-500/10 border-y border-yellow-500/30">
+        <div className="container mx-auto px-6">
+          <div className="max-w-4xl mx-auto text-center">
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <span className="text-3xl">🎮</span>
+              <h3 className="text-2xl font-bold text-white">Social Gaming Platform</h3>
+              <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-sm font-semibold">100% Legal</span>
+            </div>
+            <p className="text-gray-300 text-lg mb-4">
+              <strong className="text-yellow-400">NOT A SPORTSBOOK.</strong> We sell virtual currency (Fan Coins) for entertainment. 
+              BlackBook tokens ($BB) are <strong className="text-green-400">FREE sweepstakes entries</strong> — never purchased directly.
+            </p>
+            <div className="grid md:grid-cols-3 gap-4 mt-6">
+              <div className="bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10">
+                <div className="text-3xl mb-2">🎁</div>
+                <div className="font-bold text-white mb-1">No Purchase Necessary</div>
+                <div className="text-sm text-gray-400">Free $BB tokens with sign-up and daily logins</div>
+              </div>
+              <div className="bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10">
+                <div className="text-3xl mb-2">🧠</div>
+                <div className="font-bold text-white mb-1">Skill-Based Gameplay</div>
+                <div className="text-sm text-gray-400">Fantasy roster building, not random chance</div>
+              </div>
+              <div className="bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10">
+                <div className="text-3xl mb-2">⚖️</div>
+                <div className="font-bold text-white mb-1">Texas Law Compliant</div>
+                <div className="text-sm text-gray-400">Sweepstakes + Fantasy = Legal everywhere</div>
               </div>
             </div>
-            <div>
-              <h3 className="text-sm font-semibold text-gray-400 mb-2">Market Status</h3>
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {statusFilters.map((status) => {
-                  const count = status === 'All' 
-                    ? statusCounts.pending + statusCounts.active + statusCounts.frozen + statusCounts.resolved
-                    : status === 'Pending' 
-                    ? statusCounts.pending
-                    : status === 'Active'
-                    ? statusCounts.active
-                    : status === 'Frozen'
-                    ? statusCounts.frozen
-                    : statusCounts.resolved
-                  
-                  return (
-                    <button
-                      key={status}
-                      onClick={() => setStatusFilter(status)}
-                      className={`px-6 py-2 rounded-full font-semibold whitespace-nowrap transition-all ${
-                        statusFilter === status
-                          ? 'bg-prism-purple text-white border-2 border-prism-purple'
-                          : 'bg-dark-200 text-gray-400 border-2 border-dark-border hover:border-prism-purple/50'
-                      }`}
-                    >
-                      {status === 'Pending' && '⏳ '}
-                      {status === 'Active' && '🟢 '}
-                      {status === 'Frozen' && '🔵 '}
-                      {status === 'Resolved' && '✅ '}
-                      {status} <span className="ml-1 text-xs opacity-70">({count})</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+            <Link href="/get-started" className="inline-block mt-6 text-purple-400 hover:text-purple-300 font-semibold underline">
+              Learn how our legal model works →
+            </Link>
           </div>
         </div>
       </section>
 
-      {/* === MARKETS GRID === */}
-      <section className="relative py-12 bg-dark-100 min-h-screen">
-        <div className="max-w-7xl mx-auto px-6">
-          
-          {error ? (
-            <div className="text-center py-24">
-              <div className="mb-6">
-                <svg className="w-20 h-20 mx-auto text-prism-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <p className="text-prism-red font-bold text-xl mb-2">Cannot Connect to Layer 2</p>
-              <p className="text-gray-400 text-sm mb-2">{error}</p>
-              <p className="text-gray-500 text-xs mb-6">Make sure the L2 server is running on localhost:1234</p>
-              <button
-                onClick={loadMarkets}
-                className="px-8 py-3 rounded-xl font-semibold text-white prism-gradient-bg hover:opacity-90 transition-opacity"
+      {/* Featured Contests */}
+      <section className="py-24 bg-dark">
+        <div className="container mx-auto px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-5xl font-black text-white mb-4">FEATURED CONTESTS</h2>
+            <p className="text-xl text-gray-400">Compete in skill-based fantasy leagues with FREE sweepstakes entries</p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {featuredMarkets.map((market, index) => (
+              <motion.div
+                key={market.id}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.1 }}
               >
-                Retry Connection
-              </button>
-            </div>
-          ) : loading ? (
-            <div className="text-center py-24">
-              <div className="inline-block animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-prism-teal mb-6"></div>
-              <p className="text-gray-300 text-lg font-semibold">Loading markets...</p>
-              <p className="text-gray-500 text-sm mt-2">Fetching from Layer 2 blockchain</p>
-            </div>
-          ) : filteredMarkets.length === 0 ? (
-            <div className="text-center py-24">
-              <div className="text-6xl mb-6">🔍</div>
-              <p className="text-gray-400 text-lg">No markets found</p>
-              <p className="text-gray-500 text-sm mt-2">Try a different category or search term</p>
-            </div>
-          ) : (
-            <>
-              {/* Featured Markets */}
-              {featuredMarkets.length > 0 && searchQuery === '' && (
-                <div className="mb-12">
-                  <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-                    <span className="text-prism-gold">⭐</span>
-                    Featured Markets
-                  </h2>
-                  <div className="grid md:grid-cols-3 gap-6">
-                    {featuredMarkets.map((market) => (
-                      <MarketCard key={market.id} market={market} featured />
-                    ))}
+                <Link href={`/markets/${market.id}`}>
+                  <div className="group relative bg-dark-lighter rounded-2xl overflow-hidden border border-gray-800 hover:border-prism-teal transition-all cursor-pointer">
+                    {/* Gradient Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-prism-purple/20 to-prism-teal/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    
+                    <div className="relative p-8">
+                      <div className="flex items-center justify-between mb-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          market.status === 'active' ? 'bg-green-500/20 text-green-400' : 'bg-gray-700 text-gray-400'
+                        }`}>
+                          {market.status?.toUpperCase() || 'UNKNOWN'}
+                        </span>
+                        <span className="text-gray-400 text-sm">⚽</span>
+                      </div>
+                      
+                      <h3 className="text-2xl font-bold text-white mb-3 group-hover:text-prism-teal transition-colors">
+                        {market.title}
+                      </h3>
+                      
+                      <p className="text-gray-400 mb-6 line-clamp-2">{market.description || 'No description available'}</p>
+                      
+                      <div className="flex justify-between items-center text-sm">
+                        <div>
+                          <div className="text-gray-500">Volume</div>
+                          <div className="text-white font-bold">${market.totalVolume.toFixed(0)}</div>
+                        </div>
+                        {market.prices && market.prices.length > 0 && (
+                          <div>
+                            <div className="text-gray-500">Best Odds</div>
+                            <div className="text-prism-teal font-bold">{(market.prices[0] * 100).toFixed(0)}%</div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      <div className="mt-6 flex items-center text-prism-teal font-semibold group-hover:translate-x-2 transition-transform">
+                        VIEW MARKET <span className="ml-2">→</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              )}
+                </Link>
+              </motion.div>
+            ))}
+          </div>
 
-              {/* All Markets */}
-              <div>
-                <h2 className="text-2xl font-bold text-white mb-6">
-                  {searchQuery ? `Search Results (${filteredMarkets.length})` : `${activeCategory} Markets`}
-                </h2>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredMarkets.map((market) => (
-                    <MarketCard key={market.id} market={market} />
-                  ))}
-                </div>
+          <div className="text-center mt-12">
+            <Link href="/markets">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                className="px-8 py-3 bg-white/10 backdrop-blur-sm text-white font-bold rounded-full border-2 border-white/30 hover:bg-white/20 transition-all"
+              >
+                VIEW ALL MARKETS
+              </motion.button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section className="py-24 bg-dark-lighter">
+        <div className="container mx-auto px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-5xl font-black text-white mb-4">WHY PRISM PREDICTIONS</h2>
+            <p className="text-xl text-gray-400">The future of sports prediction markets</p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="text-center"
+            >
+              <div className="w-20 h-20 bg-gradient-to-br from-prism-teal to-prism-purple rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <span className="text-4xl">⚡</span>
               </div>
-            </>
-          )}
+              <h3 className="text-2xl font-bold text-white mb-4">Lightning Fast</h3>
+              <p className="text-gray-400">Instant settlements powered by Layer 2 blockchain technology</p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.1 }}
+              className="text-center"
+            >
+              <div className="w-20 h-20 bg-gradient-to-br from-prism-purple to-prism-teal rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <span className="text-4xl">🔒</span>
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-4">Secure & Transparent</h3>
+              <p className="text-gray-400">Every prediction recorded on-chain with cryptographic verification</p>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 30 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.2 }}
+              className="text-center"
+            >
+              <div className="w-20 h-20 bg-gradient-to-br from-prism-teal to-prism-purple rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <span className="text-4xl">💰</span>
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-4">Real Rewards</h3>
+              <p className="text-gray-400">Win based on accuracy with transparent odds and instant payouts</p>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-32 bg-gradient-to-br from-prism-purple via-dark to-prism-teal relative overflow-hidden">
+        <div className="absolute inset-0 bg-[url('/grid.svg')] opacity-10" />
+        
+        <div className="container mx-auto px-6 text-center relative z-10">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+          >
+            <h2 className="text-6xl font-black text-white mb-6">
+              READY TO PREDICT<br />THE FUTURE?
+            </h2>
+            <p className="text-2xl text-gray-200 mb-12 max-w-2xl mx-auto">
+              Join thousands of predictors making winning calls on the World Cup 2026
+            </p>
+            
+            <Link href="/markets">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="px-16 py-5 bg-white text-dark text-xl font-black rounded-full shadow-2xl hover:shadow-white/50 transition-all"
+              >
+                START PREDICTING NOW
+              </motion.button>
+            </Link>
+          </motion.div>
         </div>
       </section>
 
       <Footer />
     </div>
-  )
-}
-
-// Market Card Component
-function MarketCard({ market, featured = false }: { market: Market; featured?: boolean }) {
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'open': return 'text-prism-teal'
-      case 'active': return 'text-prism-teal'
-      case 'pending': return 'text-yellow-500'
-      case 'frozen': return 'text-blue-400'
-      case 'closed': return 'text-gray-500'
-      case 'resolved': return 'text-prism-gold'
-      default: return 'text-gray-400'
-    }
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'open': return '🟢 Open'
-      case 'active': return '🟢 Active'
-      case 'pending': return '⏳ Pending'
-      case 'frozen': return '🔵 Frozen'
-      case 'closed': return '🔴 Closed'
-      case 'resolved': return '✅ Resolved'
-      default: return status
-    }
-  }
-
-  const calculatePercentages = (market: Market) => {
-    if (!market.prices || market.prices.length === 0) {
-      return market.outcomes.map(() => `${(100 / market.outcomes.length).toFixed(0)}%`)
-    }
-    return market.prices.map(p => `${(p * 100).toFixed(0)}%`)
-  }
-
-  const percentages = calculatePercentages(market)
-  const closesDate = market.bettingClosesAt 
-    ? new Date(market.bettingClosesAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric' })
-    : 'TBD'
-
-  return (
-    <motion.div
-      whileHover={{ y: -4 }}
-      className="group"
-    >
-      <Link href={`/markets/${market.id}`} className={`block prism-card rounded-xl overflow-hidden transition-all duration-300 ${
-        featured ? 'border-2 border-prism-gold' : ''
-      }`}>
-        {/* Header */}
-        <div className="p-5 border-b border-dark-border">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex-1">
-              <h3 className="text-white font-bold text-lg group-hover:text-prism-teal transition-colors line-clamp-2">
-                {market.title}
-              </h3>
-            </div>
-            <span className={`text-sm font-semibold ${getStatusColor(market.status)}`}>
-              {getStatusBadge(market.status)}
-            </span>
-          </div>
-          
-          {market.description && (
-            <p className="text-gray-400 text-sm line-clamp-2">{market.description}</p>
-          )}
-          
-          {/* Pending Market Notice with Liquidity Progress */}
-          {market.status.toLowerCase() === 'pending' && (
-            <div className="mt-3 px-3 py-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-              <p className="text-yellow-500 text-xs font-semibold">⚠️ Needs liquidity to activate</p>
-              <div className="mt-2">
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-gray-400">Current: {market.liquidity || 0} BB</span>
-                  <span className="text-gray-400">Need: 100 BB</span>
-                </div>
-                <div className="h-1.5 bg-dark-300 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-yellow-500" 
-                    style={{ width: `${Math.min(100, ((market.liquidity || 0) / 100) * 100)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* Frozen Market Notice */}
-          {market.status.toLowerCase() === 'frozen' && (
-            <div className="mt-3 px-3 py-2 bg-blue-500/10 border border-blue-400/30 rounded-lg">
-              <p className="text-blue-400 text-xs font-semibold">🔵 Betting closed - awaiting resolution</p>
-            </div>
-          )}
-        </div>
-
-        {/* Outcomes */}
-        <div className="p-5 bg-dark-200/50 space-y-2">
-          {market.outcomes.map((outcome, idx) => (
-            <div key={idx} className="flex justify-between items-center">
-              <span className="text-gray-300 text-sm font-medium">{outcome}</span>
-              <span className="text-prism-teal font-bold">{percentages[idx]}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div className="p-5 flex items-center justify-between text-sm">
-          <div className="space-y-1">
-            <div className="text-gray-500">Volume</div>
-            <div className="text-white font-bold">{market.totalVolume.toLocaleString()} BB</div>
-          </div>
-          <div className="space-y-1 text-right">
-            <div className="text-gray-500">Closes</div>
-            <div className="text-white font-semibold">{closesDate}</div>
-          </div>
-        </div>
-
-        {featured && (
-          <div className="absolute top-3 right-3 text-prism-gold text-2xl">⭐</div>
-        )}
-      </Link>
-    </motion.div>
   )
 }

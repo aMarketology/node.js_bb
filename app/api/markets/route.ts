@@ -83,6 +83,18 @@ export async function GET(request: NextRequest) {
     const data = await response.json();
     let markets = data.markets || data || [];
 
+    // ✅ LAYER 1: API Proxy Filtering
+    // Filter active markets to only include those with liquidity >= 100 BB
+    if (status === 'active' && Array.isArray(markets)) {
+      const beforeCount = markets.length;
+      markets = markets.filter((m: any) => {
+        const liquidity = parseFloat(m.cpmm_pool?.total_liquidity || m.liquidity || 0);
+        const isResolved = m.resolved === true;
+        return !isResolved && liquidity >= 100;
+      });
+      console.log(`🔍 API Proxy: Filtered ${beforeCount} → ${markets.length} active markets (≥100 BB liquidity)`);
+    }
+
     // Filter by category if specified
     if (category && Array.isArray(markets)) {
       markets = markets.filter((m: any) => 

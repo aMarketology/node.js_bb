@@ -5,49 +5,16 @@ import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Navigation from '@/app/components/Navigation'
 import Footer from '@/app/components/Footer'
-import { useMarkets } from '@/app/contexts/MarketsContext'
-import { useCreditPrediction } from '@/app/contexts/CreditPredictionContext'
-import { useSettlement } from '@/app/contexts/SettlementContext'
 import { useAuth } from '@/app/contexts/AuthContext'
-import L2AccountInitPrompt from '@/app/components/L2AccountInitPrompt'
-import SettlementBettingInterface from '@/app/components/SettlementBettingInterface'
 
 export default function MarketDetailPage() {
   const params = useParams()
   const slug = params?.slug as string
   
-  // Use MarketsSDK for betting and liquidity operations
-  const {
-    getMarket: sdkGetMarket,
-    getQuote: sdkGetQuote,
-    placeBet: sdkPlaceBet,
-    sellShares: sdkSellShares,
-    getPosition: sdkGetPosition,
-    isReady: marketsReady
-  } = useMarkets()
-  
-  // Use CreditPrediction for credit-based betting operations
-  const { 
-    isConnected: creditConnected,
-    balance,
-    activeSession,
-    hasActiveCredit,
-    openCredit,
-    settleCredit,
-    placeBet: creditPlaceBet,
-    getQuote: creditGetQuote,
-    sellPosition,
-    getPosition: creditGetPosition,
-    refreshBalance
-  } = useCreditPrediction()
-  
-  // Settlement for L1-backed betting
-  const { isConnected: settlementConnected, healthStatus } = useSettlement()
-  
   const { isAuthenticated, activeWallet } = useAuth()
   
-  // Combined connection status
-  const isConnected = creditConnected || marketsReady
+  // Simplified state - will integrate with real L2 API later
+  const isConnected = isAuthenticated
   
   const [market, setMarket] = useState<any>(null)
   const [position, setPosition] = useState<any>(null)
@@ -105,27 +72,65 @@ export default function MarketDetailPage() {
     try {
       setLoading(true)
       
-      // Try to use MarketsSDK if available, otherwise fallback to direct API
-      if (marketsReady) {
-        const data = await sdkGetMarket(slug)
-        console.log('📊 Market data from SDK:', data)
-        if (data) {
-          setMarket(data)
-        } else {
-          throw new Error('Market not found')
-        }
-      } else {
-        // Fallback to direct L2 API call
-        const response = await fetch(`http://localhost:1234/market/${slug}`)
-        if (!response.ok) {
-          throw new Error(`Failed to fetch market: ${response.status}`)
-        }
-        const data = await response.json()
-        console.log('📊 Market data from L2:', data)
-        setMarket(data.market || data)
+      // Use direct L2 API call - endpoint is /markets (plural) not /market
+      const L2_API = process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234'
+      
+      console.log('📊 Fetching markets from L2:', L2_API)
+      const response = await fetch(`${L2_API}/markets`)
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch markets: ${response.status}`)
       }
+      
+      const data = await response.json()
+      console.log('📊 Response from L2:', data)
+      
+      // Handle different response structures
+      let markets = []
+      if (Array.isArray(data)) {
+        markets = data
+      } else if (data.markets && Array.isArray(data.markets)) {
+        markets = data.markets
+      } else if (data.events && Array.isArray(data.events)) {
+        markets = data.events
+      } else {
+        console.error('❌ Unexpected response format:', data)
+        throw new Error('Invalid response format from L2 API')
+      }
+      
+      console.log('📊 All markets from L2:', markets.length, 'markets')
+      
+      // Find our market by ID
+      const marketData = markets.find((m: any) => m.id === slug || m.event_id === slug)
+      
+      if (!marketData) {
+        console.log('❌ Market not found:', slug)
+        console.log('Available market IDs:', markets.map((m: any) => m.id || m.event_id).join(', '))
+        alert(`Market "${slug}" not found. It may have been removed or is not yet active.`)
+        window.location.href = '/markets'
+        return
+      }
+      
+      console.log('📊 Found market:', marketData)
+      
+      // Check if market is active and has liquidity
+      const liquidity = parseFloat(marketData.cpmm_pool?.total_liquidity || marketData.liquidity || 0)
+      const status = marketData.market_status || marketData.status || 'unknown'
+      
+      console.log(`📊 Market status: ${status}, liquidity: ${liquidity} BB`)
+      
+      if (liquidity < 100) {
+        console.log('⚠️ Market lacks minimum liquidity (100 BB), redirecting...')
+        alert(`This market needs at least 100 BB liquidity to be tradeable. Current: ${liquidity} BB`)
+        window.location.href = '/markets'
+        return
+      }
+      
+      setMarket(marketData)
     } catch (error: any) {
-      console.error('Failed to load market:', error)
+      console.error('❌ Failed to load market:', error)
+      alert(`Failed to load market: ${error.message}`)
+      window.location.href = '/markets'
     } finally {
       setLoading(false)
     }
@@ -133,30 +138,26 @@ export default function MarketDetailPage() {
 
   async function loadPosition() {
     try {
-      // Use CreditPredictionSDK for positions
-      const pos = creditGetPosition(market.id)
-      setPosition(pos)
+      // TODO: Integrate with position tracking when SDK is ready
+      console.log('Position tracking not yet implemented')
     } catch (error) {
       console.log('No position in this market')
     }
   }
 
   async function fetchQuote() {
-    try {
-      const amount = parseFloat(betAmount)
-      
-      // Always use CreditPredictionSDK for quotes (it has the L2 endpoints)
-      if (creditConnected) {
-        const q = await creditGetQuote(market.id, selectedOutcome, amount)
-        setQuote(q)
-      }
-    } catch (error) {
-      console.error('Failed to get quote:', error)
-    }
+    // Quote endpoint not available on L2 server
+    // User will see the bet amount they enter
+    setQuote(null)
   }
 
   // Credit Line handlers
   async function handleOpenCredit() {
+    // TODO: Implement credit line functionality
+    alert('Credit line feature coming soon!')
+    return
+    
+    /* Credit feature temporarily disabled
     if (!creditAmount || parseFloat(creditAmount) <= 0) return
     
     try {
@@ -173,9 +174,15 @@ export default function MarketDetailPage() {
     } finally {
       setOpeningCredit(false)
     }
+    */
   }
 
   async function handleSettleCredit() {
+    // TODO: Implement credit settlement
+    alert('Credit settlement feature coming soon!')
+    return
+    
+    /* Credit feature temporarily disabled
     try {
       setSettlingCredit(true)
       const result = await settleCredit()
@@ -190,33 +197,63 @@ export default function MarketDetailPage() {
     } finally {
       setSettlingCredit(false)
     }
+    */
   }
 
   async function handlePlaceBet() {
-    if (!betAmount || parseFloat(betAmount) <= 0) return
+    if (!betAmount || parseFloat(betAmount) <= 0) {
+      alert('Please enter a valid bet amount')
+      return
+    }
+    
+    if (!isAuthenticated) {
+      alert('Please connect your wallet first')
+      return
+    }
     
     try {
       setBetting(true)
       
-      // Always use CreditPredictionSDK (it has the proper L2 endpoints)
-      const result = await creditPlaceBet(market.id, selectedOutcome, parseFloat(betAmount))
+      const amount = parseFloat(betAmount)
+      
+      console.log('🎰 Placing bet:', {
+        market: market.id,
+        outcome: selectedOutcome,
+        amount
+      })
+      
+      // TODO: Implement proper bet placement with L2 API
+      alert('Betting feature coming soon! Will integrate with L2 API.')
+      
+      /* Betting temporarily disabled until SDKs are integrated
+      const result = await placeBet(market.id, selectedOutcome, amount)
       
       if (result.success) {
         setBetAmount('')
         setQuote(null)
         await loadMarket()
         await loadPosition()
-        await refreshBalance()
-        alert(`✅ Bet placed! Got ${result.shares?.toFixed(2) || 'N/A'} shares`)
+        alert(`✅ Bet placed! Got ${result.shares?.toFixed(2) || 'N/A'} shares at avg price ${result.avgPrice?.toFixed(4) || 'N/A'}`)
       } else {
         alert('❌ Failed to place bet')
       }
+      */
     } catch (error: any) {
+      console.error('❌ Bet failed:', error)
+      
       // Check if account doesn't exist on L2
       if (error.message && (error.message.includes('Account not found') || error.message.includes('account not found'))) {
+        alert('❌ Your L2 account needs to be initialized. Please deposit funds first via the Bridge page.')
         setNeedsL2Init(true)
         return
       }
+      
+      // Check for insufficient balance
+      if (error.message && error.message.includes('insufficient')) {
+        alert('❌ Insufficient L2 balance. Please deposit more funds.')
+        return
+      }
+      
       alert(`❌ Failed to place bet: ${error.message}`)
     } finally {
       setBetting(false)
@@ -225,29 +262,67 @@ export default function MarketDetailPage() {
 
   async function handleSellShares(outcome: number, shares: number) {
     try {
-      // Always use CreditPredictionSDK for selling
+      // TODO: Implement sell shares functionality
+      alert('Sell shares feature coming soon!')
+      
+      /* Temporarily disabled
       const result = await sellPosition(market.id, outcome, shares)
       if (result.success) {
         await loadMarket()
         await loadPosition()
-        await refreshBalance()
         alert('✅ Shares sold successfully!')
       }
+      */
     } catch (error: any) {
       alert(`❌ Failed to sell shares: ${error.message}`)
     }
   }
 
   async function handleAddLiquidity() {
-    if (!liquidityAmount || parseFloat(liquidityAmount) <= 0) return
+    if (!liquidityAmount || parseFloat(liquidityAmount) <= 0) {
+      alert('Please enter a valid liquidity amount')
+      return
+    }
+
+    const amount = parseFloat(liquidityAmount)
+    if (amount < 100) {
+      alert('Minimum liquidity is 100 BB')
+      return
+    }
     
     try {
       setAddingLiquidity(true)
-      // TODO: Implement liquidity through Markets SDK or direct L2 API call
-      alert('⚠️ Liquidity addition coming soon! Use the L2 server directly for now.')
+      
+      // Add liquidity via L2 API
+      const L2_API = process.env.NEXT_PUBLIC_L2_API_URL || 'http://localhost:1234'
+      
+      console.log('💧 Adding liquidity to market:', market.id, 'amount:', amount)
+      
+      const response = await fetch(`${L2_API}/market/${market.id}/liquidity/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount,
+          address: activeWalletData?.l2Address || activeWalletData?.l1Address,
+          timestamp: Date.now()
+        })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(errorText || `Server returned ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ Liquidity added:', result)
+      
       setLiquidityAmount('')
       await loadMarket()
+      await refreshBalance()
+      
+      alert(`✅ Successfully added ${amount} BB liquidity!\n${result.message || ''}`)
     } catch (error: any) {
+      console.error('❌ Failed to add liquidity:', error)
       alert(`❌ Failed to add liquidity: ${error.message}`)
     } finally {
       setAddingLiquidity(false)
@@ -484,22 +559,41 @@ export default function MarketDetailPage() {
 
               {/* Main Betting/Liquidity Card */}
               <div className="prism-card rounded-xl p-6">
-                {/* Show betting interface for active markets, liquidity panel for pending */}
-                {(() => {
-                  const status = market.market_status || market.status || 'pending'
-                  const isActive = status === 'active'
-                  console.log('💧 Market status check:', { status, isActive, marketId: market.id })
-                  return !isActive  // Show liquidity panel only if NOT active
-                })() ? (
+                {/* Tabs for Bet vs Liquidity */}
+                <div className="flex gap-2 mb-6">
+                  <button 
+                    onClick={() => setShowLiquidityPanel(false)}
+                    className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all ${!showLiquidityPanel ? 'bg-prism-teal text-white' : 'bg-dark-300 text-gray-400 hover:text-white'}`}
+                  >
+                    🎲 Bet
+                  </button>
+                  <button 
+                    onClick={() => setShowLiquidityPanel(true)}
+                    className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all ${showLiquidityPanel ? 'bg-prism-gold text-dark' : 'bg-dark-300 text-gray-400 hover:text-white'}`}
+                  >
+                    💧 Add Liquidity
+                  </button>
+                </div>
+
+                {!showLiquidityPanel ? (
                   <>
-                    <h3 className="text-xl font-bold text-white mb-4">🚀 Initialize Market</h3>
-                    <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                      <p className="text-yellow-500 text-sm font-semibold mb-2">This market needs initial liquidity</p>
-                      <p className="text-gray-400 text-xs">Be the first liquidity provider and earn fees from all trades</p>
-                    </div>
+                    {/* Betting Panel */}
+                    <h3 className="text-xl font-bold text-white mb-4">Place Bet</h3>
+                    
+                    {/* Credit feature temporarily disabled
+                    {hasActiveCredit && (
+                      <div className="mb-4 p-3 bg-purple-500/20 border border-purple-500/30 rounded-lg">
+                        <div className="flex items-center gap-2">
+                          <span>💳</span>
+                          <span className="text-purple-300 text-sm font-semibold">Using Credit Line</span>
+                        </div>
+                      </div>
+                    )}
+                    */}
+                    
                     {!isAuthenticated ? (
                       <div className="text-center py-8">
-                        <p className="text-gray-400 mb-4">Sign in to add liquidity</p>
+                        <p className="text-gray-400 mb-4">Sign in to place bets</p>
                         <button 
                           onClick={() => window.location.href = '/'}
                           className="px-6 py-3 rounded-xl font-semibold text-white prism-gradient-bg"
@@ -524,156 +618,6 @@ export default function MarketDetailPage() {
                       </div>
                     ) : (
                       <>
-                        <div className="mb-4">
-                          <label className="block text-sm font-medium text-gray-400 mb-2">Initial Liquidity Amount (BB)</label>
-                          <input 
-                            type="number" 
-                            value={liquidityAmount} 
-                            onChange={(e) => setLiquidityAmount(e.target.value)} 
-                            placeholder="1000" 
-                            className="w-full px-4 py-3 rounded-lg bg-dark-300 border border-dark-border text-white focus:border-prism-teal focus:ring-1 focus:ring-prism-teal transition-colors" 
-                          />
-                          <p className="text-xs text-gray-500 mt-2">
-                            💡 Minimum: 100 BB to activate • Recommended: 1000+ BB for better trading
-                          </p>
-                        </div>
-                        
-                        <div className="mb-6 p-4 bg-prism-teal/10 border border-prism-teal/30 rounded-lg">
-                          <h4 className="text-white font-semibold text-sm mb-2">💰 Benefits</h4>
-                          <ul className="text-xs text-gray-400 space-y-1">
-                            <li>• Earn 2% fee on all trades</li>
-                            <li>• Initial LP shares at fair price</li>
-                            <li>• Remove liquidity anytime</li>
-                          </ul>
-                        </div>
-                        
-                        <button 
-                          onClick={handleAddLiquidity} 
-                          disabled={addingLiquidity || !liquidityAmount || parseFloat(liquidityAmount) < 100} 
-                          className="w-full px-6 py-4 rounded-xl font-semibold text-white prism-gradient-bg hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {addingLiquidity ? (
-                            <span className="flex items-center justify-center gap-2">
-                              <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
-                              Initializing Market...
-                            </span>
-                          ) : (
-                            `Initialize with ${liquidityAmount || '0'} BB`
-                          )}
-                        </button>
-                        
-                        <div className="mt-4 text-xs text-gray-500 text-center">
-                          Using wallet: {activeWallet === 'alice' ? '🟣 Alice' : activeWallet === 'bob' ? '🔵 Bob' : '👤 Your Wallet'}
-                        </div>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    {/* Tabs for Bet vs Liquidity */}
-                    <div className="flex gap-2 mb-6">
-                      <button 
-                        onClick={() => setShowLiquidityPanel(false)}
-                        className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all ${!showLiquidityPanel ? 'bg-prism-teal text-white' : 'bg-dark-300 text-gray-400 hover:text-white'}`}
-                      >
-                        🎲 Bet
-                      </button>
-                      <button 
-                        onClick={() => setShowLiquidityPanel(true)}
-                        className={`flex-1 px-4 py-2 rounded-lg font-semibold transition-all ${showLiquidityPanel ? 'bg-prism-gold text-dark' : 'bg-dark-300 text-gray-400 hover:text-white'}`}
-                      >
-                        💧 Liquidity
-                      </button>
-                    </div>
-
-                    {!showLiquidityPanel ? (
-                      <>
-                        {/* Settlement Betting Mode Toggle */}
-                        {settlementConnected && healthStatus.l1Healthy && (
-                          <div className="mb-4 flex items-center justify-between p-3 bg-dark-300 rounded-lg">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm">🔒 L1-Backed Betting</span>
-                              {useSettlementBetting && (
-                                <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded">Active</span>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => setUseSettlementBetting(!useSettlementBetting)}
-                              className={`w-12 h-6 rounded-full transition-colors ${
-                                useSettlementBetting ? 'bg-green-500' : 'bg-gray-600'
-                              }`}
-                            >
-                              <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                                useSettlementBetting ? 'translate-x-6' : 'translate-x-0.5'
-                              }`} />
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Use Settlement Betting Interface when enabled */}
-                        {useSettlementBetting && settlementConnected ? (
-                          <SettlementBettingInterface 
-                            market={{
-                              id: market.id,
-                              title: market.title,
-                              description: market.description,
-                              outcomes: outcomes,
-                              prices: prices,
-                              status: (market.market_status || market.status || 'active') as any,
-                              winning_outcome: market.winning_outcome,
-                              liquidity: market.cpmm_pool?.total_liquidity,
-                              volume: market.total_volume
-                            }}
-                            onBetPlaced={async () => {
-                              await loadMarket()
-                              await loadPosition()
-                              await refreshBalance()
-                            }}
-                          />
-                        ) : (
-                          <>
-                        {/* Betting Panel */}
-                        <h3 className="text-xl font-bold text-white mb-4">Place Bet</h3>
-                        
-                        {/* Credit indicator if active */}
-                        {hasActiveCredit && (
-                          <div className="mb-4 p-3 bg-purple-500/20 border border-purple-500/30 rounded-lg">
-                            <div className="flex items-center gap-2">
-                              <span>💳</span>
-                              <span className="text-purple-300 text-sm font-semibold">Using Credit Line</span>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {!isAuthenticated ? (
-                          <div className="text-center py-8">
-                            <p className="text-gray-400 mb-4">Sign in to place bets</p>
-                            <button 
-                              onClick={() => window.location.href = '/'}
-                              className="px-6 py-3 rounded-xl font-semibold text-white prism-gradient-bg"
-                            >
-                              Sign In
-                            </button>
-                          </div>
-                        ) : !isConnected ? (
-                          <div className="text-center py-8">
-                            <div className="mb-4">
-                              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-prism-teal mx-auto"></div>
-                            </div>
-                            <p className="text-gray-400 mb-2">Connecting to L2...</p>
-                            <p className="text-xs text-gray-500">
-                              Active Wallet: {activeWallet === 'alice' ? '🟣 Alice' : activeWallet === 'bob' ? '🔵 Bob' : activeWallet || 'None'}
-                            </p>
-                            {activeWallet === 'user' && (
-                              <p className="text-xs text-yellow-500 mt-2">
-                                ⚠️ User wallets not yet supported. Please use Alice or Bob test accounts.
-                              </p>
-                            )}
-                          </div>
-                        ) : needsL2Init ? (
-                          <L2AccountInitPrompt />
-                        ) : (
-                          <>
                             <div className="mb-4">
                               <label className="block text-sm font-medium text-gray-400 mb-2">Selected Outcome</label>
                               <div className="px-4 py-3 rounded-lg bg-dark-300 border border-dark-border text-white font-semibold">
@@ -741,10 +685,8 @@ export default function MarketDetailPage() {
                             </div>
                           </>
                         )}
-                      </>
-                        )}
-                      </>
-                    ) : (
+                  </>
+                ) : (
                       <>
                         {/* Liquidity Panel */}
                         <h3 className="text-xl font-bold text-white mb-4">💧 Add Liquidity</h3>
@@ -835,9 +777,7 @@ export default function MarketDetailPage() {
                         )}
                       </>
                     )}
-                  </>
-                )}
-              </div>
+                </div>
 
               {/* Create Prop Bet Card */}
               {isAuthenticated && isConnected && (market.market_status === 'active' || market.status === 'active') && (

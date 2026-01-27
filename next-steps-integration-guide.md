@@ -14,12 +14,13 @@
 4. [✅ Phase 2: Alphabetical JSON Signing](#phase-2-alphabetical-json-signing) - **COMPLETED**
 5. [✅ Phase 3: Activity-Based Session Management](#phase-3-activity-based-session-management) - **COMPLETED**
 6. [✅ Phase 4: Market Standards & Validation](#phase-4-market-standards--validation) - **COMPLETED**
-7. [Phase 5: Live Markets Integration](#phase-5-live-markets-integration) - **IN PROGRESS**
-8. [Phase 6: Unified Balance Display](#phase-6-unified-balance-display)
-9. [Phase 7: Bridge UI Completion](#phase-7-bridge-ui-completion)
-10. [Phase 8: Production Hardening](#phase-8-production-hardening)
-11. [Testing Checklist](#testing-checklist)
-12. [Troubleshooting Guide](#troubleshooting-guide)
+7. [✅ Phase 5: Live Markets Integration](#phase-5-live-markets-integration) - **COMPLETED**
+8. [🔴 Phase 5.5: PRISM Legal Compliance](#phase-55-prism-legal-compliance) - **CRITICAL - IN PROGRESS**
+9. [Phase 6: Unified Balance Display](#phase-6-unified-balance-display)
+10. [Phase 7: Bridge UI Completion](#phase-7-bridge-ui-completion)
+11. [Phase 8: Production Hardening](#phase-8-production-hardening)
+12. [Testing Checklist](#testing-checklist)
+13. [Troubleshooting Guide](#troubleshooting-guide)
 
 ---
 
@@ -806,17 +807,45 @@ The `market-standards.js` module exports:
 **Duration**: 4-6 hours  
 **Risk**: Medium (API integration)  
 **Dependencies**: Phases 1-4 complete  
-**Status**: 🔄 **IN PROGRESS**
+**Status**: ✅ **COMPLETE - 3-Layer Defense Implemented**
 
-### 5.1 Current State
+### 5.1 Achievements
 
-✅ Market standards defined and tested  
+✅ Market standards defined and tested (85/85 tests passing)  
 ✅ MarketsSDK ready with all methods  
-⚠️ Markets page shows static/mock data  
-⚠️ No validation on market creation forms  
-⚠️ No enforcement of $100 min liquidity
+✅ **3-layer filtering defense implemented**  
+✅ Markets page shows only active markets with ≥$100 BB liquidity  
+✅ Market detail pages redirect unfunded markets  
+✅ API proxy filters at server edge (99% payload reduction)  
+⚠️ No validation on market creation forms (deferred to Phase 6)
 
-### 5.2 Required Changes
+### 5.2 Implemented: 3-Layer Filtering Defense
+
+To ensure only tradeable markets are displayed, filtering now occurs at three layers:
+
+**LAYER 1: API Proxy** ([app/api/markets/route.ts](app/api/markets/route.ts))
+- Filters at server edge before sending to client
+- Checks: `!resolved && liquidity >= 100`
+- Impact: Reduces payload from ~350 markets → ~3 markets (99% reduction)
+
+**LAYER 2: SDK** ([sdk/markets-sdk.js](sdk/markets-sdk.js))
+- Defensive client-side filtering
+- Checks: `!resolved && liquidity >= 100`
+- Impact: Safety net if API proxy bypassed
+
+**LAYER 3: Frontend** ([app/markets/page.tsx](app/markets/page.tsx))
+- Final safety net before display
+- Checks: `!resolved && liquidity >= 100`
+- Impact: Prevents any unfunded markets from rendering
+
+**Console Output Example:**
+```
+🔍 API Proxy: Filtered 354 → 3 active markets (≥100 BB liquidity)
+🛡️ SDK Filter: 3 → 3 active markets (≥100 BB liquidity)
+✅ Frontend: Loaded 3 active markets with liquidity (filtered from 3 total)
+```
+
+### 5.3 Market Creation Form Validation (Deferred to Phase 6)
 
 **File**: `app/markets/page.tsx`
 
@@ -958,6 +987,365 @@ export default function CreateMarketForm() {
 - [ ] Markets below $100 liquidity stay in "pending" status
 - [ ] Markets with invalid data are rejected client-side
 - [ ] Real-time market updates every 10 seconds
+
+---
+
+## 🔴 Phase 5.5: PRISM Legal Compliance - CRITICAL
+
+**Goal**: Make PRISM contests legally compliant as Skill Games with full transparency and fraud prevention
+
+**Duration**: 6-8 hours  
+**Risk**: HIGH (legal/compliance)  
+**Dependencies**: Phase 5 complete, Supabase `prism` table created  
+**Status**: 🔴 **IN PROGRESS**
+
+### 5.5.1 The Problem: Contests Are Not Legally Defensible
+
+Current gaps that make contests legally risky:
+
+| Issue | Risk | Solution |
+|-------|------|----------|
+| No lock time enforcement | **FRAUD** (past-posting) | Server-side timestamp validation |
+| No scoring rules visible | Not a "skill game" | Display all rules before entry |
+| No oracle proof | Disputes unresolvable | Store raw API snapshots |
+| Immediate settlement | Data instability | Cool-down period (15-60 min) |
+| No tiebreaker rules | Ambiguous payouts | Published rules in footer |
+
+### 5.5.2 Required Schema Changes
+
+**File**: `scripts/seed-prism-contests.sql`
+
+Add these columns to `prism` table:
+
+```sql
+-- Lock/Settle Timestamps (Unix epoch for precision)
+ALTER TABLE prism ADD COLUMN lock_timestamp BIGINT;           -- Unix epoch (e.g., 1738490000)
+ALTER TABLE prism ADD COLUMN settle_timestamp BIGINT;         -- Unix epoch for settlement
+ALTER TABLE prism ADD COLUMN buffer_minutes INTEGER DEFAULT 5; -- Pre-event lock buffer
+ALTER TABLE prism ADD COLUMN lock_type TEXT DEFAULT 'scheduled'; -- 'scheduled', 'event_start', 'upload_window'
+
+-- Settlement Configuration
+ALTER TABLE prism ADD COLUMN cooldown_minutes INTEGER DEFAULT 30; -- Wait before grading
+ALTER TABLE prism ADD COLUMN oracle_snapshot JSONB;              -- Raw API response (proof)
+ALTER TABLE prism ADD COLUMN oracle_fetched_at TIMESTAMPTZ;      -- When snapshot was taken
+ALTER TABLE prism ADD COLUMN oracle_signature TEXT;              -- Dealer signs the snapshot
+
+-- Scoring & Tiebreakers
+ALTER TABLE prism ADD COLUMN scoring_rules JSONB;                -- e.g., {"view": 1, "like": 5}
+ALTER TABLE prism ADD COLUMN tiebreaker_rules JSONB DEFAULT '{"method": "split_equal"}'::jsonb;
+-- Options: {"method": "split_equal"} or {"method": "secondary_metric", "metric": "shots_on_target"}
+
+-- Entry Immutability
+ALTER TABLE prism_entries ADD COLUMN entry_timestamp BIGINT;     -- Unix epoch of entry
+ALTER TABLE prism_entries ADD COLUMN entry_signature TEXT;       -- User's signature (proof)
+ALTER TABLE prism_entries ADD COLUMN locked BOOLEAN DEFAULT false; -- Locked after lock_timestamp
+```
+
+### 5.5.3 Server-Side Lock Enforcement
+
+**File**: `app/api/prism/enter/route.ts` (NEW)
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+
+export async function POST(req: NextRequest) {
+  const { contest_id, user_id, picks, signature } = await req.json()
+  
+  // 1. Fetch contest lock time
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  
+  const { data: contest, error } = await supabase
+    .from('prism')
+    .select('lock_timestamp, buffer_minutes, status')
+    .eq('id', contest_id)
+    .single()
+  
+  if (error || !contest) {
+    return NextResponse.json({ error: 'Contest not found' }, { status: 404 })
+  }
+  
+  // 2. CRITICAL: Past-posting check
+  const nowUnix = Math.floor(Date.now() / 1000)
+  const effectiveLock = contest.lock_timestamp - (contest.buffer_minutes * 60)
+  
+  if (nowUnix >= effectiveLock) {
+    return NextResponse.json({ 
+      error: 'ENTRY_LOCKED',
+      message: 'Contest entries have closed',
+      locked_at: effectiveLock,
+      current_time: nowUnix
+    }, { status: 400 })
+  }
+  
+  // 3. Verify user signature
+  // ... signature verification logic
+  
+  // 4. Insert entry with timestamp proof
+  const { data: entry, error: entryError } = await supabase
+    .from('prism_entries')
+    .insert({
+      contest_id,
+      user_id,
+      picks,
+      entry_timestamp: nowUnix,
+      entry_signature: signature,
+      locked: false
+    })
+    .select()
+    .single()
+  
+  if (entryError) {
+    return NextResponse.json({ error: entryError.message }, { status: 500 })
+  }
+  
+  return NextResponse.json({ 
+    success: true, 
+    entry,
+    time_until_lock: effectiveLock - nowUnix 
+  })
+}
+```
+
+### 5.5.4 Settlement Engine with Cool-Down
+
+**File**: `app/api/prism/settle/route.ts` (NEW)
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+
+export async function POST(req: NextRequest) {
+  const { contest_id } = await req.json()
+  
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  
+  // 1. Fetch contest
+  const { data: contest } = await supabase
+    .from('prism')
+    .select('*')
+    .eq('id', contest_id)
+    .single()
+  
+  if (!contest) {
+    return NextResponse.json({ error: 'Contest not found' }, { status: 404 })
+  }
+  
+  // 2. Check cool-down period
+  const nowUnix = Math.floor(Date.now() / 1000)
+  const settleAfter = contest.settle_timestamp + (contest.cooldown_minutes * 60)
+  
+  if (nowUnix < settleAfter) {
+    return NextResponse.json({ 
+      error: 'COOLDOWN_ACTIVE',
+      message: `Wait ${Math.ceil((settleAfter - nowUnix) / 60)} more minutes`,
+      settle_after: settleAfter
+    }, { status: 400 })
+  }
+  
+  // 3. Fetch oracle data
+  const oracleSnapshot = await fetchOracleData(contest)
+  
+  // 4. Store raw snapshot as proof
+  await supabase
+    .from('prism')
+    .update({
+      oracle_snapshot: oracleSnapshot,
+      oracle_fetched_at: new Date().toISOString(),
+      oracle_signature: signOracleData(oracleSnapshot)
+    })
+    .eq('id', contest_id)
+  
+  // 5. Calculate scores
+  const { data: entries } = await supabase
+    .from('prism_entries')
+    .select('*')
+    .eq('contest_id', contest_id)
+  
+  const scored = entries.map(e => ({
+    ...e,
+    final_score: calculateScore(e.picks, oracleSnapshot, contest.scoring_rules)
+  }))
+  
+  // 6. Rank and apply tiebreaker
+  const ranked = applyTiebreakerRules(scored, contest.tiebreaker_rules)
+  
+  // 7. Distribute payouts
+  const payouts = applyPayoutStructure(ranked, contest.prize_pool, contest.payout_structure)
+  
+  // 8. Update entries with final scores and payouts
+  for (const payout of payouts) {
+    await supabase
+      .from('prism_entries')
+      .update({ 
+        score: payout.final_score, 
+        payout: payout.amount,
+        locked: true 
+      })
+      .eq('id', payout.entry_id)
+  }
+  
+  // 9. Mark contest as settled
+  await supabase
+    .from('prism')
+    .update({ status: 'settled' })
+    .eq('id', contest_id)
+  
+  return NextResponse.json({ 
+    success: true,
+    settled_at: nowUnix,
+    payouts: payouts.map(p => ({ user_id: p.user_id, amount: p.amount, rank: p.rank }))
+  })
+}
+
+// Helper functions
+async function fetchOracleData(contest: any) {
+  // Fetch from YouTube API, Sportradar, etc. based on contest.oracle_source
+  if (contest.oracle_source?.includes('YouTube')) {
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?id=${contest.game_data.video_id}&part=statistics&key=${process.env.YOUTUBE_API_KEY}`
+    )
+    return await response.json()
+  }
+  // ... other oracle sources
+}
+
+function signOracleData(data: any): string {
+  // Sign with dealer private key
+  const message = JSON.stringify(data)
+  // ... Ed25519 signing
+  return 'signature_hex'
+}
+
+function calculateScore(picks: any, oracle: any, rules: any): number {
+  // Apply scoring rules to picks based on oracle data
+  let score = 0
+  // ... scoring logic
+  return score
+}
+
+function applyTiebreakerRules(entries: any[], rules: any): any[] {
+  const sorted = entries.sort((a, b) => b.final_score - a.final_score)
+  
+  // Handle ties based on rules
+  if (rules.method === 'split_equal') {
+    // Group by score, split prizes
+  } else if (rules.method === 'secondary_metric') {
+    // Use secondary metric to break ties
+  }
+  
+  return sorted.map((e, i) => ({ ...e, rank: i + 1 }))
+}
+```
+
+### 5.5.5 Frontend: The "Contract" Display
+
+**Update**: `app/contest/[id]/page.tsx`
+
+Add a "Contest Rules" section that displays ALL required information BEFORE user can enter:
+
+```tsx
+{/* LEGAL COMPLIANCE: The "Contract" */}
+<div className="bg-gray-800/50 border border-gray-700 rounded-xl p-6 mb-6">
+  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+    📋 Contest Rules & Terms
+  </h2>
+  
+  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+    {/* Entry Info */}
+    <div>
+      <span className="text-gray-500">Entry Fee</span>
+      <p className="text-lg font-bold">{contest.entry_fee} $BB</p>
+    </div>
+    <div>
+      <span className="text-gray-500">Prize Pool</span>
+      <p className="text-lg font-bold text-green-400">{contest.prize_pool} $BB</p>
+    </div>
+    
+    {/* Timing */}
+    <div>
+      <span className="text-gray-500">Entries Lock</span>
+      <p className="font-semibold text-yellow-400">
+        {new Date(contest.lock_timestamp * 1000).toLocaleString()}
+      </p>
+    </div>
+    <div>
+      <span className="text-gray-500">Results Final</span>
+      <p className="font-semibold">
+        {new Date((contest.settle_timestamp + contest.cooldown_minutes * 60) * 1000).toLocaleString()}
+      </p>
+    </div>
+  </div>
+  
+  {/* Scoring Rules - CRITICAL */}
+  <div className="mt-4 pt-4 border-t border-gray-700">
+    <h3 className="font-semibold mb-2">📊 Scoring Rules</h3>
+    <div className="bg-gray-900/50 rounded p-3 font-mono text-sm">
+      {Object.entries(contest.scoring_rules || {}).map(([key, value]) => (
+        <div key={key}>{key}: {value} pts</div>
+      ))}
+    </div>
+  </div>
+  
+  {/* Data Source */}
+  <div className="mt-4 pt-4 border-t border-gray-700">
+    <h3 className="font-semibold mb-2">🔮 Oracle / Data Source</h3>
+    <p className="text-gray-400">{contest.oracle_source}</p>
+    {contest.status === 'settled' && contest.oracle_snapshot && (
+      <button 
+        onClick={() => setShowOracleProof(true)}
+        className="mt-2 text-cyan-400 hover:underline text-sm"
+      >
+        View Oracle Proof →
+      </button>
+    )}
+  </div>
+  
+  {/* Tiebreaker */}
+  <div className="mt-4 pt-4 border-t border-gray-700 text-xs text-gray-500">
+    <strong>Tiebreaker:</strong> {
+      contest.tiebreaker_rules?.method === 'split_equal' 
+        ? 'In case of tie, prizes are split equally among tied players.'
+        : `Secondary metric: ${contest.tiebreaker_rules?.metric}`
+    }
+  </div>
+</div>
+```
+
+### 5.5.6 Lock Types for Different Events
+
+| Lock Type | Use Case | Implementation |
+|-----------|----------|----------------|
+| `scheduled` | "Contest locks at 12:00 PM" | `lock_timestamp` = exact time |
+| `event_start` | "Locks 5 min before kickoff" | `lock_timestamp` = kickoff - `buffer_minutes` |
+| `upload_window` | "MrBeast Saturday Upload" | `lock_timestamp` = Friday 11:59 PM, settle_timestamp = Sunday 12:00 AM |
+
+### 5.5.7 Success Criteria
+
+- [ ] Schema updated with all compliance fields
+- [ ] `POST /api/prism/enter` rejects entries after `lock_timestamp`
+- [ ] Contest page displays ALL required fields before entry
+- [ ] `POST /api/prism/settle` waits for cool-down period
+- [ ] Oracle snapshot stored as JSONB proof
+- [ ] Tiebreaker rules displayed in footer
+- [ ] "View Oracle Proof" button shows raw API response on settled contests
+
+### 5.5.8 Files to Create/Modify
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `scripts/seed-prism-contests.sql` | MODIFY | Add compliance columns |
+| `app/api/prism/enter/route.ts` | CREATE | Server-side lock enforcement |
+| `app/api/prism/settle/route.ts` | CREATE | Settlement with cool-down |
+| `app/contest/[id]/page.tsx` | MODIFY | Display contract fields |
+| `app/components/OracleProofModal.tsx` | CREATE | Show raw oracle data |
+| `lib/oracle-sdk.ts` | CREATE | Fetch YouTube/Sportradar data |
 
 ---
 

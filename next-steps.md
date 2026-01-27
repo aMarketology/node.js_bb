@@ -1,14 +1,52 @@
-# BlackBook Frontend Integration - Technical Roadmap
+# BlackBook Fantasy Sweepstakes - Production Roadmap
 
-**Last Updated**: January 23, 2026  
-**Status**: Backend Complete ✅ → Frontend Integration In Progress ⚠️  
-**Focus**: Connect Production-Ready L1/L2 Infrastructure to User-Facing UI
+**Last Updated**: January 26, 2026  
+**Status**: Architecture Refactored ✅ → Fantasy Contest Platform In Progress 🎯  
+**Focus**: Launch Production-Ready Skill-Based Fantasy Sweepstakes Platform
 
 ---
 
-## 🎯 Reality Check: Infrastructure is DONE
+## 🎯 Platform Vision: Fantasy Sweepstakes, Not Prediction Markets
 
-**Critical Insight**: Both L1 and L2 are **production-ready** with comprehensive APIs, SDKs, and security. The blocker is **frontend integration** - wiring up the existing backend to the Next.js UI.
+**Critical Pivot**: BlackBook is now a **skill-based fantasy sweepstakes platform** - NOT a prediction market or sportsbook. Users draft rosters, compete in contests, and win prizes. 100% legal under social gaming laws.
+
+### 🎮 What We're Building
+
+**The Product**: Skill-based fantasy contests (Creator Duels, Roster Drafts, Bingo) where:
+- Users buy **Fan Coins (FC)** for entertainment
+- Receive **FREE $BB tokens** as sweepstakes entries (never purchased)
+- Build rosters using skill and strategy
+- Win real prizes based on performance
+
+**Legal Shield**: Double defense (Sweepstakes + Skill-Based) = NOT gambling
+
+---
+
+## 📊 Recent Architecture Overhaul (Jan 26, 2026)
+
+### ✅ Casino Model Data Architecture - COMPLETE
+
+Successfully refactored entire codebase to follow the "Casino Model":
+
+| Layer | Purpose | What Lives Here |
+|-------|---------|-----------------|
+| **L1 (Base)** | The Vault | Real deposits/withdrawals, vault balances |
+| **L2 (Redb)** | The Table | Active contests, live entries, playthrough tracking |
+| **Supabase** | The Front Desk | Profiles, Fan Gold, settled contest history |
+
+**Key Changes**:
+- ✅ Renamed `bets` → `bet_history` (settled only)
+- ✅ Renamed `markets` → `market_history` (resolved only)
+- ✅ Created `contest_history`, `contest_entry_history`, `fan_gold_transactions`
+- ✅ Removed live-stat tracking from Supabase (L2 is source of truth)
+- ✅ Indexer now only syncs AFTER settlement
+- ✅ API routes read from correct layer (L2 for active, Supabase for history)
+
+**Documentation**: See `DATA_ARCHITECTURE.md` for complete guide
+
+---
+
+## 🎯 What's Already Built (Infrastructure)
 
 ### 📊 What's Already Built (Backend)
 
@@ -95,32 +133,319 @@ POST /resolve                  - Resolve market with winner
 
 ---
 
-## ❌ What's NOT Built (Frontend Gap)
+## 🚀 PRODUCTION ROADMAP: Fantasy Sweepstakes Platform
 
-### Frontend Issues
-1. **User Wallet L2 Signing** - Code path exists but disabled, defaults to Alice/Bob test accounts
-2. **L1 Balance Display** - Not querying L1 API for real balances
-3. **L2 Balance Display** - Shows L2 balance but not L1 or unified view
-4. **Bridge UI** - BridgeInterface.tsx exists but incomplete
-5. **Signature Format** - Frontend not using alphabetically-sorted JSON for L2
-6. **Transaction History** - No UI for L1 transactions
-7. **Unified Balance** - Not showing L1 Available + L2 Locked
-8. **Password Re-prompt** - Not prompting for password on each transaction
-9. **Error Handling** - Generic error messages, not user-friendly
-
-### Integration Blockers
-- [ ] Frontend uses wrong signature format for L2 (not alphabetical)
-- [ ] User wallet private key derivation not wired up for L2 signing
-- [ ] No bridge deposit flow (L1 → L2)
-- [ ] No bridge withdrawal flow (L2 → L1)
-- [ ] Balance polling not implemented
-- [ ] Market status not using L2 API correctly
+### Phase 0: Architecture Foundation ✅ (COMPLETE - Jan 26)
+- [x] Data layer separation (L1/L2/Supabase)
+- [x] Historical vs active state separation
+- [x] Contest history tables created
+- [x] Fan Gold system implemented
+- [x] Oracle proof storage for fairness
+- [x] Leaderboard views from historical data
+- [x] Documentation (DATA_ARCHITECTURE.md)
 
 ---
 
-## 🔴 PHASE 1: Fix User Wallet L2 Signing (CRITICAL - 2-3 days)
+## 🔴 PHASE 1: Contest Foundation (CRITICAL - Week 1)
 
-**Problem**: Frontend defaults to Alice/Bob test wallets. User's real wallet is created but not used for L2 operations.
+### 1.1 Contest Database Schema
+**Status**: Tables created ✅, needs population
+
+**Tables**:
+- `contest_history` - Settled contests with oracle proofs
+- `contest_entry_history` - User entries with picks
+- `profiles` - User profiles + Fan Gold balance
+
+**Action Items**:
+- [ ] Create contest seed data (5 example contests)
+- [ ] Add test entries for each contest
+- [ ] Verify oracle_data JSON structure
+- [ ] Test leaderboard view aggregation
+
+---
+
+### 1.2 Contest Lobby Page (`/contest`)
+**Purpose**: The "Terminal" - where users browse and enter contests
+
+**File**: `app/contest/page.tsx` (NEW)
+
+**Features**:
+- [ ] Grid of ContestCard components
+- [ ] Filter by type (Duel, Roster, Bingo)
+- [ ] Filter by category (Sports, YouTube)
+- [ ] Sort by: Prize Pool, Starting Soon, Popularity
+- [ ] Status badges: UPCOMING, LIVE, ENDED
+- [ ] Entry fee + prize pool display
+- [ ] Countdown timer (locks in X hours)
+- [ ] "Enter Contest" button
+
+**Data Source**: Fetch from L2 `/contests` endpoint
+
+**Example API Response**:
+```typescript
+GET /contests?status=active
+{
+  contests: [
+    {
+      id: "duel-mrbeast-speed-123",
+      type: "duel",
+      category: "youtube",
+      title: "MrBeast vs IShowSpeed: View Count Battle",
+      description: "Who gains more views in 24 hours?",
+      entities: ["MrBeast", "IShowSpeed"],
+      entry_fee: 10,
+      prize_pool: 500,
+      participants: 45,
+      max_participants: 100,
+      locks_at: "2026-01-27T12:00:00Z",
+      status: "active"
+    }
+  ]
+}
+```
+
+---
+
+### 1.3 Contest Entry Modal
+**Purpose**: User selects their pick (Duel) or builds roster (Draft)
+
+**Component**: Enhance existing `RosterBuilder.tsx`
+
+**For Duels**:
+- [ ] Show 2 entities (MrBeast vs IShowSpeed)
+- [ ] User clicks one to pick
+- [ ] Show current metrics (subscribers, views)
+- [ ] "Confirm Entry (10 $BB)" button
+
+**For Roster Drafts**:
+- [ ] Show player list with salaries
+- [ ] Drag-and-drop roster building
+- [ ] Salary cap tracker ($50k)
+- [ ] Projected scores
+- [ ] "Submit Roster (20 $BB)" button
+
+**For Bingo**:
+- [ ] Show 3x3 grid of events
+- [ ] User selects line to complete
+- [ ] "Lock In Picks (5 $BB)" button
+
+**API Integration**:
+```typescript
+POST /contest/enter
+{
+  contest_id: "duel-mrbeast-speed-123",
+  user_address: "L2_XXX",
+  selection: { pick: "MrBeast" },
+  signature: "xxx"
+}
+```
+
+---
+
+### 1.4 Live Contest Dashboard (`/contest/[id]`)
+**Purpose**: Watch scores update in real-time
+
+**File**: `app/contest/[id]/page.tsx` (NEW)
+
+**Features**:
+- [ ] Contest header (title, timer, prize pool)
+- [ ] Live leaderboard (top 10 entries)
+- [ ] User's current position highlighted
+- [ ] Score polling (every 10s)
+- [ ] Status: UPCOMING → LIVE → SETTLED
+- [ ] Chat/reactions sidebar
+
+**Data Source**: Poll L2 `/contest/:id/scores` every 10 seconds
+
+**Example API**:
+```typescript
+GET /contest/duel-mrbeast-speed-123/scores
+{
+  status: "live",
+  ends_at: "2026-01-27T12:00:00Z",
+  leaderboard: [
+    {
+      user_address: "L2_XXX",
+      pick: "MrBeast",
+      current_score: 125000,  // views gained
+      rank: 1
+    }
+  ]
+}
+```
+
+---
+
+## 🟡 PHASE 2: Settlement & Fairness (HIGH - Week 2)
+
+### ⚠️ LEGAL COMPLIANCE REQUIREMENTS (CRITICAL)
+
+To make contests legally compliant as **Skill Games** and functional, every contest must satisfy the "Contract" principle - all variables known before betting.
+
+#### 2.0 The Contest "Manifest" (Required Fields)
+
+Every contest in the `prism` table MUST have these fields visible on the Contest Detail Page:
+
+| Field | Example | Why It's "Legit" |
+|-------|---------|------------------|
+| `title` | "MrBeast Saturday Upload" | Clear event identification |
+| `game_type` | `duel`, `roster`, `bingo` | Defines skillset required |
+| `entry_fee` | 10 $BB | The "Consideration" (cost to play) |
+| `payout_structure` | Winner Take All / Top 3 | Users know potential payout (the "Prize") |
+| `scoring_rules` | "1 View = 1 Pt, 1 Like = 5 Pts" | **CRITICAL** - removes ambiguity |
+| `oracle_source` | "Official YouTube API" | Tells user who the "Referee" is |
+| `lock_timestamp` | Unix timestamp (1738490000) | Exact second betting stops |
+| `settle_timestamp` | Unix timestamp | Exact second score is final |
+| `tiebreaker_rules` | "Split equally" | Published in footer |
+
+#### 2.0.1 The "Freeze" Requirements (Lock)
+
+**Past-Posting Prevention** - If a user bets after an event starts, that's FRAUD.
+
+| Rule | Implementation |
+|------|----------------|
+| **Hard Lock** | Store `lock_timestamp` as Unix epoch. Any `POST /enter` at `timestamp + 1` → `400 Error` |
+| **Pre-Event Buffer** | For live events, lock 5 min before kickoff (TV delay is ~7 seconds) |
+| **Upload Trigger** | For YouTube uploads: Lock at midnight before upload day. E.g., "Saturday Upload" locks Friday 11:59 PM |
+
+**Schema Changes**:
+```sql
+ALTER TABLE prism ADD COLUMN lock_timestamp BIGINT NOT NULL; -- Unix epoch
+ALTER TABLE prism ADD COLUMN buffer_minutes INTEGER DEFAULT 5;
+ALTER TABLE prism ADD COLUMN lock_type TEXT DEFAULT 'scheduled'; -- 'scheduled', 'event_start', 'upload_window'
+```
+
+#### 2.0.2 The "Resolution" Requirements (Grade)
+
+**Don't settle immediately** - APIs lag, view counts jump.
+
+| Rule | Implementation |
+|------|----------------|
+| **Cool-Down Period** | Wait 15-60 min after event ends before grading |
+| **Verification Snapshot** | Store raw JSON response from oracle in `oracle_snapshot` |
+| **Dispute Window** | Show raw API log if user disputes: "At 12:00 PM, API reported 9.8M views" |
+
+**Schema Changes**:
+```sql
+ALTER TABLE prism ADD COLUMN cooldown_minutes INTEGER DEFAULT 30;
+ALTER TABLE prism ADD COLUMN oracle_snapshot JSONB; -- Raw API response
+ALTER TABLE prism ADD COLUMN oracle_fetched_at TIMESTAMPTZ;
+ALTER TABLE prism ADD COLUMN oracle_signature TEXT; -- Dealer signs the snapshot
+```
+
+#### 2.0.3 Tie-Breaker Logic
+
+Published rules (in footer/rules section):
+- "In the event of a tie, the Prize Pool is split equally among tied users"
+- Or: "Tiebreaker: Player with more [secondary metric] wins"
+
+**Schema**:
+```sql
+ALTER TABLE prism ADD COLUMN tiebreaker_rules JSONB DEFAULT '{"method": "split_equal"}'::jsonb;
+-- Options: {"method": "split_equal"} or {"method": "secondary_metric", "metric": "shots_on_target"}
+```
+
+---
+
+### 2.1 Oracle Integration
+**Purpose**: Fetch external data for contest results
+
+**Options**:
+1. **YouTube Data API v3** - For creator stats
+2. **Opta Sports API** - For soccer/sports data
+3. **Custom Oracle** - For Beast Games/custom events
+
+**Action Items**:
+- [ ] Set up YouTube API credentials
+- [ ] Build oracle service in Rust (separate microservice)
+- [ ] Implement data fetching + signing
+- [ ] Store signed data in `contest_history.oracle_data`
+
+**Example Oracle Data**:
+```json
+{
+  "source": "YouTube Data API v3",
+  "timestamp": "2026-01-27T12:00:00Z",
+  "contest_id": "duel-mrbeast-speed-123",
+  "data": {
+    "mrbeast": {
+      "channel_id": "UCX6OQ3...",
+      "start_views": 1000000,
+      "end_views": 1450200,
+      "delta": 450200
+    },
+    "ishowspeed": {
+      "channel_id": "UCX6OQ3...",
+      "start_views": 800000,
+      "end_views": 1180000,
+      "delta": 380000
+    }
+  },
+  "winner": "mrbeast",
+  "signature": "0x..."
+}
+```
+
+---
+
+### 2.2 Settlement Engine
+**Purpose**: Calculate winners and distribute payouts
+
+**File**: `lib/settlement-engine.ts` (NEW)
+
+**Logic**:
+```typescript
+async function settleContest(contestId: string) {
+  // 1. Fetch oracle data
+  const oracleData = await fetchOracleData(contestId)
+  
+  // 2. Calculate scores for all entries
+  const entries = await getContestEntries(contestId)
+  const scored = entries.map(e => ({
+    ...e,
+    final_score: calculateScore(e.selection, oracleData)
+  }))
+  
+  // 3. Rank entries
+  const ranked = scored.sort((a, b) => b.final_score - a.final_score)
+  
+  // 4. Apply payout structure
+  const payouts = applyPayoutStructure(ranked, prizePool)
+  
+  // 5. Distribute via L2
+  await distributePayouts(payouts)
+  
+  // 6. Sync to Supabase history
+  await indexer.syncSettledContest(contestId)
+}
+```
+
+**Payout Structures**:
+- **Duel (1v1)**: Winner takes all (minus 10% rake)
+- **Roster (Top 3)**: 50% / 30% / 20%
+- **Bingo (First)**: Winner gets full pot
+
+**Tie Logic**:
+- If 2nd and 3rd tie: Split their combined prizes equally
+- If all tie: Push (refund all entries)
+
+---
+
+### 2.3 Fairness Proof UI
+**Purpose**: Show users how winners were determined
+
+**Component**: `app/components/OracleProofModal.tsx` (NEW)
+
+**Features**:
+- [ ] Click "View Oracle Data" on settled contest
+- [ ] Show JSON dump of oracle_data
+- [ ] Verify signature on-chain
+- [ ] Link to external source (YouTube video, etc.)
+- [ ] Timestamp verification
+
+---
+
+## 🟢 PHASE 3: User Experience & Engagement (MEDIUM - Week 3)
 
 ### Current Broken Flow
 ```typescript

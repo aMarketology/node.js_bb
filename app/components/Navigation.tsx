@@ -5,19 +5,21 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { useAuth } from '@/app/contexts/AuthContext'
 import { useFractal } from '@/app/contexts/FractalContext'
-import { useCreditPrediction } from '@/app/contexts/CreditPredictionContext'
+import { useWallet } from '@/app/contexts/UnifiedWalletContext'
+import { useMode } from './ModeToggle'
 import { formatAddress } from '@/lib/blockchain'
 import AuthModal from './AuthModal'
+import ModeToggle, { BalanceDisplay } from './ModeToggle'
 
 export default function Navigation() {
   const { user, walletAddress, isAuthenticated, isKYCVerified, signOut, activeWallet, switchWallet } = useAuth()
   const { fractalEnabled, setFractalEnabled } = useFractal()
-  const { hasActiveCredit, activeSession, balance, settleCredit } = useCreditPrediction()
+  const { l2Balance } = useWallet()
   const [scrolled, setScrolled] = useState(false)
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showWalletMenu, setShowWalletMenu] = useState(false)
   const [grayscaleMode, setGrayscaleMode] = useState(false)
-  const [settlingCredit, setSettlingCredit] = useState(false)
 
   useEffect(() => {
     const handleScroll = () => {
@@ -49,14 +51,41 @@ export default function Navigation() {
       <motion.nav
         initial={{ y: -100 }}
         animate={{ y: 0 }}
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+        className="fixed top-0 left-0 right-0 z-50"
+      >
+        {/* Legal Banner */}
+        <div className="bg-gradient-to-r from-yellow-500/20 via-green-500/20 to-blue-500/20 border-b border-yellow-500/30">
+          <div className="max-w-7xl mx-auto px-6 py-2">
+            <div className="flex items-center justify-between gap-4 text-xs md:text-sm">
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-lg">🎮</span>
+                <span className="font-bold text-white">Social Gaming Platform</span>
+                <span className="text-gray-400 hidden md:inline">•</span>
+                <span className="text-gray-300 hidden md:inline">
+                  <strong className="text-yellow-400">NOT A SPORTSBOOK</strong> — Free sweepstakes entries
+                </span>
+                <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full text-xs font-semibold">
+                  100% Legal
+                </span>
+              </div>
+              <Link 
+                href="/get-started" 
+                className="px-3 py-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap"
+              >
+                Learn More
+              </Link>
+            </div>
+          </div>
+        </div>
+        
+        {/* Main Navigation */}
+        <div className={`transition-all duration-300 ${
           scrolled
             ? 'bg-dark-100/90 backdrop-blur-xl border-b border-dark-border'
-            : 'bg-transparent'
-        }`}
-      >
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex justify-between items-center">
+            : 'bg-dark-100/70 backdrop-blur-sm'
+        }`}>
+          <div className="max-w-7xl mx-auto px-6 py-3">
+          <div className="flex justify-between items-center gap-4">
             {/* Logo */}
             <Link href="/" className="flex items-center gap-3">
               <motion.div
@@ -75,11 +104,16 @@ export default function Navigation() {
                     PRISM
                   </span>
                   <span className="block text-[10px] text-gray-400 tracking-widest">
-                    WORLD CUP 2026
+                    SOCIAL GAMING
                   </span>
                 </div>
               </motion.div>
             </Link>
+
+            {/* Mode Toggle - Center Prominence */}
+            <div className="flex-1 flex justify-center">
+              <ModeToggle />
+            </div>
 
             {/* Fractal Toggle */}
             <motion.button
@@ -126,46 +160,95 @@ export default function Navigation() {
               </div>
             </motion.button>
 
-            {/* Credit Session Indicator */}
-            {isAuthenticated && hasActiveCredit && activeSession && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="ml-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/50"
-              >
-                <span className="text-lg">💳</span>
-                <div className="text-xs">
-                  <div className="text-purple-300 font-semibold">Credit Active</div>
-                  <div className="text-gray-400">{balance.available.toLocaleString()} BB</div>
-                </div>
-                <button
-                  onClick={async () => {
-                    if (settlingCredit) return
-                    setSettlingCredit(true)
-                    try {
-                      const result = await settleCredit()
-                      if (result.success) {
-                        alert(`✅ Credit settled! P&L: ${result.pnl >= 0 ? '+' : ''}${result.pnl} BB`)
-                      }
-                    } finally {
-                      setSettlingCredit(false)
-                    }
-                  }}
-                  disabled={settlingCredit}
-                  className="ml-1 px-2 py-1 rounded bg-purple-500/30 hover:bg-purple-500/50 text-purple-200 text-xs font-semibold transition-colors disabled:opacity-50"
-                >
-                  {settlingCredit ? '...' : 'Settle'}
-                </button>
-              </motion.div>
-            )}
-
             {/* Desktop Menu */}
-            <div className="hidden md:flex items-center gap-8">
-              <NavLink href="/markets">Markets</NavLink>
+            <div className="hidden md:flex items-center gap-4">
+              {/* Balance Display */}
+              {isAuthenticated && (
+                <div className="mr-4">
+                  <BalanceDisplay />
+                </div>
+              )}
+              
+              <NavLink href="/markets">Contests</NavLink>
+              <NavLink href="/get-started">How It Works</NavLink>
+              <NavLink href="/store">Store</NavLink>
               {isAuthenticated && <NavLink href="/wallet">Wallet</NavLink>}
               
               {/* Auth Section */}
               {isAuthenticated ? (
+                <div className="flex items-center gap-3">
+                  {/* Wallet Switcher Dropdown */}
+                  <div className="relative">
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      onClick={() => setShowWalletMenu(!showWalletMenu)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-lg bg-dark-200 border border-dark-border hover:border-prism-teal transition-colors"
+                    >
+                      <span className="text-sm">
+                        {activeWallet === 'alice' ? '🟣 Alice' : 
+                         activeWallet === 'bob' ? '🔵 Bob' :
+                         activeWallet === 'mac' ? '💻 Mac' :
+                         '👤 User'}
+                      </span>
+                      <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </motion.button>
+
+                    {/* Wallet Dropdown */}
+                    {showWalletMenu && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="absolute top-full right-0 mt-2 w-48 bg-dark-200 border border-dark-border rounded-xl shadow-2xl overflow-hidden z-50"
+                      >
+                        <div className="p-2">
+                          <button
+                            onClick={() => { switchWallet('user'); setShowWalletMenu(false) }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-left text-sm rounded-lg transition-colors ${
+                              activeWallet === 'user' ? 'bg-prism-teal/20 text-prism-teal' : 'text-gray-300 hover:bg-dark-300'
+                            }`}
+                          >
+                            <span>👤</span>
+                            <span>Your Wallet</span>
+                            {activeWallet === 'user' && <span className="ml-auto text-prism-teal">✓</span>}
+                          </button>
+                          <button
+                            onClick={() => { switchWallet('alice'); setShowWalletMenu(false) }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-left text-sm rounded-lg transition-colors ${
+                              activeWallet === 'alice' ? 'bg-prism-purple/20 text-prism-purple' : 'text-gray-300 hover:bg-dark-300'
+                            }`}
+                          >
+                            <span>🟣</span>
+                            <span>Alice</span>
+                            {activeWallet === 'alice' && <span className="ml-auto text-prism-purple">✓</span>}
+                          </button>
+                          <button
+                            onClick={() => { switchWallet('bob'); setShowWalletMenu(false) }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-left text-sm rounded-lg transition-colors ${
+                              activeWallet === 'bob' ? 'bg-prism-teal/20 text-prism-teal' : 'text-gray-300 hover:bg-dark-300'
+                            }`}
+                          >
+                            <span>🔵</span>
+                            <span>Bob</span>
+                            {activeWallet === 'bob' && <span className="ml-auto text-prism-teal">✓</span>}
+                          </button>
+                          <button
+                            onClick={() => { switchWallet('mac'); setShowWalletMenu(false) }}
+                            className={`w-full flex items-center gap-3 px-4 py-3 text-left text-sm rounded-lg transition-colors ${
+                              activeWallet === 'mac' ? 'bg-green-500/20 text-green-400' : 'text-gray-300 hover:bg-dark-300'
+                            }`}
+                          >
+                            <span>💻</span>
+                            <span>Mac</span>
+                            {activeWallet === 'mac' && <span className="ml-auto text-green-400">✓</span>}
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  {/* User Menu */}
                 <div className="relative">
                   <motion.button
                     whileHover={{ scale: 1.05 }}
@@ -220,62 +303,6 @@ export default function Navigation() {
                         </div>
                       </div>
 
-                      {/* Wallet Switcher */}
-                      <div className="p-2 border-b border-dark-border">
-                        <div className="text-xs font-medium text-gray-500 px-4 py-2">Switch Wallet</div>
-                        <button
-                          onClick={() => {
-                            switchWallet('user')
-                            setShowUserMenu(false)
-                          }}
-                          className={`w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-lg transition-colors ${
-                            activeWallet === 'user'
-                              ? 'bg-prism-teal/20 text-prism-teal'
-                              : 'text-gray-300 hover:bg-dark-300'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span>👤</span>
-                            <span>Your Wallet</span>
-                          </div>
-                          {activeWallet === 'user' && <span className="text-prism-teal">✓</span>}
-                        </button>
-                        <button
-                          onClick={() => {
-                            switchWallet('alice')
-                            setShowUserMenu(false)
-                          }}
-                          className={`w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-lg transition-colors ${
-                            activeWallet === 'alice'
-                              ? 'bg-prism-purple/20 text-prism-purple'
-                              : 'text-gray-300 hover:bg-dark-300'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span>🟣</span>
-                            <span>Alice</span>
-                          </div>
-                          {activeWallet === 'alice' && <span className="text-prism-purple">✓</span>}
-                        </button>
-                        <button
-                          onClick={() => {
-                            switchWallet('bob')
-                            setShowUserMenu(false)
-                          }}
-                          className={`w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-lg transition-colors ${
-                            activeWallet === 'bob'
-                              ? 'bg-prism-teal/20 text-prism-teal'
-                              : 'text-gray-300 hover:bg-dark-300'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <span>🔵</span>
-                            <span>Bob</span>
-                          </div>
-                          {activeWallet === 'bob' && <span className="text-prism-teal">✓</span>}
-                        </button>
-                      </div>
-
                       <div className="p-2">
                         <MenuButton href="/settings" icon="⚙️">Settings</MenuButton>
                         <button
@@ -291,6 +318,7 @@ export default function Navigation() {
                       </div>
                     </motion.div>
                   )}
+                </div>
                 </div>
               ) : (
                 <motion.button
@@ -312,6 +340,7 @@ export default function Navigation() {
               </svg>
             </button>
           </div>
+        </div>
         </div>
       </motion.nav>
 

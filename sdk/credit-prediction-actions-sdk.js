@@ -126,7 +126,7 @@ export class CreditPredictionSDK {
     const message = JSON.stringify(sortedTx);
     console.log('📝 Signing transaction (alphabetically sorted):', message.substring(0, 100) + '...');
     const signature = await this.signer(message);
-    return { tx: sortedTx, signature, signer: this.address };
+    return { tx: sortedTx, signature, signer: this.publicKey };
   }
 
   /**
@@ -306,12 +306,24 @@ export class CreditPredictionSDK {
    * Get L2 balance for connected wallet
    */
   async getBalance() {
-    const res = await this.l2Get(`/balance/${this.address}`);
-    return {
-      available: res.l2_available || 0,
-      locked: res.l2_locked || 0,
-      hasActiveCredit: res.has_active_credit || false
-    };
+    try {
+      console.log(`📡 Fetching L2 balance from: ${this.l2Url}/balance/${this.address}`);
+      const res = await this.l2Get(`/balance/${this.address}`);
+      console.log(`💰 L2 Balance response:`, res);
+      
+      return {
+        available: res.balance || res.l2_available || res.available || 0,
+        locked: res.locked || res.l2_locked || 0,
+        hasActiveCredit: res.has_active_credit || false
+      };
+    } catch (error) {
+      console.error(`❌ Failed to get L2 balance:`, error);
+      return {
+        available: 0,
+        locked: 0,
+        hasActiveCredit: false
+      };
+    }
   }
 
   /**
@@ -341,8 +353,13 @@ export class CreditPredictionSDK {
    * Get all positions for connected wallet
    */
   async getPositions() {
-    const res = await this.l2Get(`/unified/positions/${this.address}`);
-    return res.positions || [];
+    try {
+      const res = await this.l2Get(`/unified/positions/${this.address}`);
+      return res.positions || [];
+    } catch (error) {
+      console.log('⚠️ Positions endpoint not available, returning empty array');
+      return [];
+    }
   }
 
   /**
@@ -401,29 +418,69 @@ export class CreditPredictionSDK {
    * @param {number} amount - Amount to withdraw
    */
   async requestWithdrawal(amount) {
-    const tx = {
-      action: 'withdraw_request',
-      wallet: this.address,
-      amount,
-      timestamp: Date.now()
+    // Create withdrawal request with timestamp and nonce
+    const timestamp = Math.floor(Date.now() / 1000); // Unix timestamp in seconds
+    const nonce = this.generateNonce();
+    
+    // Match the API's expected signature format
+    const signaturePayload = {
+      action: 'WITHDRAW_REQUEST',
+      nonce,
+      payload: {
+        amount,
+        from_address: this.address
+      },
+      timestamp
     };
-
-    const signed = await this.signTransaction(tx);
-    const res = await this.l2Post('/withdraw', {
-      ...signed,
-      address: this.address,
-      amount
+    
+    // Sort keys alphabetically and create message for signing
+    const sortedPayload = this.sortKeysAlphabetically(signaturePayload);
+    const message = JSON.stringify(sortedPayload);
+    
+    console.log('🔐 SDK Signing withdrawal...');
+    console.log('   Payload:', signaturePayload);
+    console.log('   Sorted:', sortedPayload);
+    console.log('   Message:', message);
+    console.log('   Message length:', message.length);
+    console.log('   Message bytes (first 50):', Buffer.from(message, 'utf-8').toString('hex').substring(0, 100));
+    
+    // Sign with special marker for L2 withdrawal (signer will add chain ID byte)
+    console.log('   Calling signer with options:', { chainId: 2, operation: 'withdraw' });
+    const signature = await this.signer(message, { chainId: 2, operation: 'withdraw' });
+    
+    console.log('   Public key:', this.publicKey);
+    console.log('   Signature:', signature);
+    
+    // Call Next.js API route instead of L2 directly
+    const res = await fetch('/api/bridge/withdraw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from_address: this.address,
+        amount,
+        public_key: this.publicKey,
+        signature,
+        timestamp,
+        nonce
+      })
     });
 
-    if (res.success) {
-      this.emit({ type: 'withdrawal_requested', amount, requestId: res.request_id });
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`Withdrawal failed: ${errorText}`);
+    }
+
+    const data = await res.json();
+
+    if (data.success) {
+      this.emit({ type: 'withdrawal_requested', amount, requestId: data.withdrawal_id });
     }
 
     return {
-      success: res.success !== false,
-      requestId: res.request_id,
-      status: res.status || 'pending',
-      message: res.message || 'Withdrawal requested'
+      success: data.success !== false,
+      requestId: data.withdrawal_id,
+      status: data.status || 'pending',
+      message: data.message || 'Withdrawal requested'
     };
   }
 
@@ -619,17 +676,42 @@ export class CreditPredictionSDK {
    * @param {number} amount - Amount to spend
    */
   async bet(marketId, outcomeIndex, amount) {
-    const tx = {
-      action: 'buy',
-      wallet: this.address,
-      market_id: marketId,
-      outcome_index: outcomeIndex,
-      amount,
-      timestamp: Date.now()
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = this.generateNonce();
+    
+    // Signature message structure (nested format)
+    const signatureMessage = {
+      action: 'BUY',
+      nonce: nonce,
+      payload: {
+        amount: amount,
+        market_id: marketId,
+        outcome: outcomeIndex,
+        user: this.address
+      },
+      timestamp: timestamp
     };
     
-    const signed = await this.signTransaction(tx);
-    const res = await this.l2Post('/cpmm/buy', signed);
+    // Sort keys alphabetically and sign
+    const sortedMessage = this.sortKeysAlphabetically(signatureMessage);
+    const messageStr = JSON.stringify(sortedMessage);
+    console.log('📝 Signing BUY message:', messageStr.substring(0, 150) + '...');
+    const signature = await this.signer(messageStr);
+    
+    // Final payload (flat structure for request body)
+    const payload = {
+      user: this.address,
+      market_id: marketId,
+      outcome: outcomeIndex,
+      amount: amount,
+      public_key: this.publicKey,
+      signature: signature,
+      timestamp: timestamp,
+      nonce: nonce
+    };
+    
+    console.log('🎰 Sending bet payload:', JSON.stringify(payload).substring(0, 200) + '...');
+    const res = await this.l2Post('/buy', payload);
     
     const result = {
       success: res.success !== false,
@@ -653,17 +735,41 @@ export class CreditPredictionSDK {
    * @param {number} shares - Number of shares to sell
    */
   async sell(marketId, outcomeIndex, shares) {
-    const tx = {
-      action: 'sell',
-      wallet: this.address,
-      market_id: marketId,
-      outcome_index: outcomeIndex,
-      shares,
-      timestamp: Date.now()
+    const timestamp = Math.floor(Date.now() / 1000);
+    const nonce = this.generateNonce();
+    
+    // Signature message structure (nested format)
+    const signatureMessage = {
+      action: 'SELL',
+      nonce: nonce,
+      payload: {
+        market_id: marketId,
+        outcome: outcomeIndex,
+        shares: shares,
+        user: this.address
+      },
+      timestamp: timestamp
     };
     
-    const signed = await this.signTransaction(tx);
-    const res = await this.l2Post('/cpmm/sell', signed);
+    // Sort keys alphabetically and sign
+    const sortedMessage = this.sortKeysAlphabetically(signatureMessage);
+    const messageStr = JSON.stringify(sortedMessage);
+    console.log('📝 Signing SELL message:', messageStr.substring(0, 150) + '...');
+    const signature = await this.signer(messageStr);
+    
+    // Final payload (flat structure for request body)
+    const payload = {
+      user: this.address,
+      market_id: marketId,
+      outcome: outcomeIndex,
+      shares: shares,
+      public_key: this.publicKey,
+      signature: signature,
+      timestamp: timestamp,
+      nonce: nonce
+    };
+    
+    const res = await this.l2Post('/sell', payload);
     
     return {
       success: res.success !== false,
@@ -679,7 +785,7 @@ export class CreditPredictionSDK {
    * @param {string} marketId - Market ID
    */
   async getPrices(marketId) {
-    const res = await this.l2Get(`/cpmm/prices/${marketId}`);
+    const res = await this.l2Get(`/prices/${marketId}`);
     return res.prices || [];
   }
 
@@ -688,7 +794,7 @@ export class CreditPredictionSDK {
    * @param {string} marketId - Market ID
    */
   async getPool(marketId) {
-    const res = await this.l2Get(`/cpmm/pool/${marketId}`);
+    const res = await this.l2Get(`/pool/${marketId}`);
     return {
       reserves: res.reserves || [],
       k: res.k || 0,
@@ -1230,12 +1336,23 @@ export class CreditPredictionSDK {
   }
 
   async l2Get(path) {
-    const res = await fetch(`${this.l2Url}${path}`, {
+    const url = `${this.l2Url}${path}`;
+    console.log(`🌐 L2 GET: ${url}`);
+    
+    const res = await fetch(url, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     });
-    if (!res.ok) throw new Error(`L2 GET failed: ${await res.text()}`);
-    return res.json();
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`❌ L2 GET failed (${res.status}):`, errorText);
+      throw new Error(`L2 GET ${path} failed (${res.status}): ${errorText}`);
+    }
+    
+    const data = await res.json();
+    console.log(`✅ L2 GET ${path} response:`, data);
+    return data;
   }
 
   async l2Post(path, body) {

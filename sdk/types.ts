@@ -26,7 +26,7 @@ export interface UnlockedWallet {
   mnemonic?: string
 }
 
-export type SignerFunction = (message: string) => Promise<string>
+export type SignerFunction = (message: string, options?: { chainId?: number; operation?: string }) => Promise<string>
 
 // ═══════════════════════════════════════════════════════════════════════════
 // BALANCE TYPES

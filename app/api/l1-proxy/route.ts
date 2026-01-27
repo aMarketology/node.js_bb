@@ -23,8 +23,39 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const data = await response.json()
-    return NextResponse.json(data)
+    // Check if response is ok
+    if (!response.ok) {
+      console.error('❌ L1 API returned non-OK status:', response.status)
+      return NextResponse.json(
+        { error: 'L1 API error', status: response.status },
+        { status: response.status }
+      )
+    }
+
+    // Get the response text first to check if it's empty
+    const responseText = await response.text()
+    
+    // If empty or whitespace only, return empty array/object depending on endpoint
+    if (!responseText || responseText.trim() === '') {
+      console.warn('⚠️ L1 API returned empty response for:', url)
+      // Return appropriate empty response based on endpoint
+      if (endpoint.includes('/history')) {
+        return NextResponse.json({ success: true, transactions: [] })
+      }
+      return NextResponse.json({ success: false, error: 'Empty response from L1' })
+    }
+
+    // Try to parse as JSON
+    try {
+      const data = JSON.parse(responseText)
+      return NextResponse.json(data)
+    } catch (parseError) {
+      console.error('❌ Failed to parse L1 response as JSON:', responseText.substring(0, 100))
+      return NextResponse.json(
+        { error: 'Invalid JSON response from L1', details: responseText.substring(0, 200) },
+        { status: 500 }
+      )
+    }
   } catch (error: any) {
     console.error('L1 proxy error:', error)
     return NextResponse.json(

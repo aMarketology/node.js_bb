@@ -32,13 +32,19 @@ export default function Footer() {
               </div>
               <div>
                 <span className="text-2xl font-bold prism-gradient-text">PRISM</span>
-                <span className="block text-xs text-gray-400">World Cup 2026 Predictions</span>
+                <span className="block text-xs text-gray-400">Social Gaming Platform</span>
               </div>
             </div>
             <p className="text-gray-400 max-w-md mb-6">
-              Experience the future of sports prediction with our prism-powered platform. 
-              Every color represents a dimension of the beautiful game.
+              PRISM is a social gaming platform offering skill-based fantasy contests. Purchase virtual currency, receive FREE sweepstakes entries. 100% legal entertainment.
             </p>
+            
+            {/* Legal Disclaimer */}
+            <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg mb-6">
+              <p className="text-yellow-200 text-xs leading-relaxed">
+                <strong>NOT A SPORTSBOOK:</strong> PRISM sells virtual currency (Fan Coins) for entertainment. BlackBook tokens ($BB) are FREE sweepstakes entries, never purchased. All contests are skill-based fantasy games (legal under Texas law). No purchase necessary to play.
+              </p>
+            </div>
             
             {/* Prism color legend */}
             <div className="flex gap-2">
@@ -57,13 +63,26 @@ export default function Footer() {
           <div>
             <h4 className="text-white font-semibold mb-4">Quick Links</h4>
             <ul className="space-y-3">
-              {['Matches', 'Markets', 'Leaderboard', 'How It Works'].map((link) => (
-                <li key={link}>
-                  <a href="#" className="text-gray-400 hover:text-prism-teal transition-colors">
-                    {link}
-                  </a>
-                </li>
-              ))}
+              <li>
+                <Link href="/get-started" className="text-gray-400 hover:text-prism-teal transition-colors">
+                  How It Works
+                </Link>
+              </li>
+              <li>
+                <Link href="/markets" className="text-gray-400 hover:text-prism-teal transition-colors">
+                  Contests
+                </Link>
+              </li>
+              <li>
+                <Link href="/wallet" className="text-gray-400 hover:text-prism-teal transition-colors">
+                  My Wallet
+                </Link>
+              </li>
+              <li>
+                <a href="#" className="text-gray-400 hover:text-prism-teal transition-colors">
+                  Leaderboard
+                </a>
+              </li>
             </ul>
           </div>
 

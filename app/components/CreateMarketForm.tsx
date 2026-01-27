@@ -39,8 +39,8 @@ const MARKET_CATEGORIES = [
   { value: 'tech', label: 'Technology' },
   { value: 'science', label: 'Science' },
   { value: 'world', label: 'World Events' },
+  { value: 'social', label: 'Social' },
   { value: 'other', label: 'Other' }
-  { value: 'social', label: 'Social' }
 ]
 
 interface FormData {
