@@ -118,15 +118,15 @@ export default function Navigation() {
                 <span className="text-lg">🎮</span>
                 <span className="font-bold text-white">Social Gaming Platform</span>
                 <span className="text-gray-400 hidden md:inline">•</span>
-                <span className="text-gray-300 hidden md:inline">
+                <Link href="/fantasy-sweepstakes" className="text-gray-300 hidden md:inline hover:text-white transition-colors">
                   <strong className="text-yellow-400">NOT A SPORTSBOOK</strong> — Free sweepstakes entries
-                </span>
-                <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full text-xs font-semibold">
+                </Link>
+                <Link href="/fantasy-sweepstakes" className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded-full text-xs font-semibold hover:bg-green-500/30 transition-colors">
                   100% Legal
-                </span>
+                </Link>
               </div>
               <Link 
-                href="/get-started" 
+                href="/fantasy-sweepstakes" 
                 className="px-3 py-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap"
               >
                 Learn More
