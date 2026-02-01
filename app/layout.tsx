@@ -31,18 +31,18 @@ export default function RootLayout({
         <GoogleAnalytics />
       </head>
       <body className="antialiased">
-        <ClientLayout>
-          <div id="grayscale-wrapper">
-            <AuthProvider>
-              <AnalyticsProvider>
-                <UnifiedWalletProvider>
+        <div id="grayscale-wrapper">
+          <AuthProvider>
+            <AnalyticsProvider>
+              <UnifiedWalletProvider>
+                <ClientLayout>
                   {children}
-                </UnifiedWalletProvider>
-              </AnalyticsProvider>
-              <CookieConsent />
-            </AuthProvider>
-          </div>
-        </ClientLayout>
+                </ClientLayout>
+              </UnifiedWalletProvider>
+            </AnalyticsProvider>
+            <CookieConsent />
+          </AuthProvider>
+        </div>
       </body>
     </html>
   )

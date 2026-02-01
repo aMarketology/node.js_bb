@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Trophy, Users, Clock, DollarSign, Zap, Youtube, Gamepad2 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
+import { useL2Markets } from '@/app/contexts/L2MarketsContext'
+import { useFanCredit } from '@/app/contexts/FanCreditContext'
 import { Database } from '@/lib/database.types'
 
 type Contest = Database['public']['Tables']['contests_metadata']['Row']
@@ -15,6 +17,8 @@ type Contest = Database['public']['Tables']['contests_metadata']['Row']
 export default function LobbyPage() {
   const router = useRouter()
   const supabase = createClient()
+  const { liveContests, loading: l2Loading, formatAmount } = useL2Markets()
+  const { balance: fcBalance, canEnterContest } = useFanCredit()
   const [contests, setContests] = useState<Contest[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'fan_gold' | 'bb'>('all')
@@ -164,10 +168,98 @@ export default function LobbyPage() {
 
       {/* Contest Grid */}
       <div className="max-w-7xl mx-auto">
+        {/* L2 Live Contests Section */}
+        {liveContests && liveContests.length > 0 && (
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-4 text-prism-cyan">🔥 Live L2 Contests</h2>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+              {liveContests.map((contest) => (
+                <Card
+                  key={contest.contest_id}
+                  className="bg-gray-800 border-prism-cyan hover:border-prism-cyan/70 transition-all cursor-pointer"
+                  onClick={() => router.push(`/contest/${contest.contest_id}`)}
+                >
+                  <CardHeader>
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Trophy className="h-5 w-5 text-prism-cyan" />
+                        <Badge variant="default" className="bg-red-600">
+                          🔴 LIVE
+                        </Badge>
+                      </div>
+                      <Badge variant="outline" className={contest.currency === 'FanCoin' ? 'text-purple-400' : 'text-green-400'}>
+                        {contest.currency === 'FanCoin' ? 'FC' : 'BB'}
+                      </Badge>
+                    </div>
+                    <CardTitle className="text-xl">{contest.name || `Contest ${contest.contest_id.slice(0, 8)}`}</CardTitle>
+                    <CardDescription>
+                      {contest.currency === 'FanCoin' ? 'Entertainment Only - No Purchase Necessary' : 'Real Money Contest'}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {/* Entry Fee */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-400">Entry Fee</span>
+                        <span className={`font-semibold ${contest.currency === 'FanCoin' ? 'text-purple-400' : 'text-green-400'}`}>
+                          {formatAmount(contest.entry_fee, contest.currency === 'FanCoin' ? 'FC' : 'BB')}
+                        </span>
+                      </div>
+
+                      {/* Participants */}
+                      {contest.participants && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-gray-400 flex items-center gap-1">
+                            <Users className="h-4 w-4" />
+                            Entries
+                          </span>
+                          <span className="text-sm">
+                            {contest.participants.length}/{contest.max_participants}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Prize Pool */}
+                      {contest.totalPrizePool && (
+                        <div className="flex items-center justify-between pt-2 border-t border-gray-700">
+                          <span className="text-sm text-gray-400">Prize Pool</span>
+                          <span className={`text-lg font-bold ${contest.currency === 'FanCoin' ? 'text-purple-400' : 'text-green-400'}`}>
+                            {formatAmount(contest.totalPrizePool, contest.currency === 'FanCoin' ? 'FC' : 'BB')}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Enter Button */}
+                      <Button
+                        className={`w-full mt-4 ${contest.currency === 'FanCoin' ? 'bg-gradient-to-r from-purple-600 to-purple-400' : 'bg-gradient-to-r from-prism-cyan to-prism-magenta'} hover:opacity-90`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          router.push(`/contest/${contest.contest_id}`)
+                        }}
+                        disabled={contest.isFull}
+                      >
+                        {contest.isFull ? 'Contest Full' : 'Enter Contest'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Supabase Contests Section */}
+        <h2 className="text-2xl font-bold mb-4">📋 All Contests</h2>
         {loading ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-prism-cyan"></div>
-            <p className="mt-contest_id}
+            <p className="mt-4 text-gray-400">Loading contests...</p>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredContests.map((contest) => (
+              <Card
+                key={contest.contest_id}
                 className="bg-gray-800 border-gray-700 hover:border-prism-cyan transition-all cursor-pointer"
                 onClick={() => router.push(`/contest/${contest.contest_id}`)}
               >
@@ -219,12 +311,6 @@ export default function LobbyPage() {
                         Entries
                       </span>
                       <span className="text-sm">
-                        {contest.current_e="flex items-center justify-between">
-                      <span className="text-sm text-gray-400 flex items-center gap-1">
-                        <Users className="h-4 w-4" />
-                        Entries
-                      </span>
-                      <span className="text-sm">
                         {contest.participants}/{contest.max_participants}
                       </span>
                     </div>
@@ -239,13 +325,13 @@ export default function LobbyPage() {
                         {getTimeRemaining(contest.locks_at)}
                       </span>
                     </div>
-contest_
+
                     {/* Enter Button */}
                     <Button
                       className="w-full mt-4 bg-gradient-to-r from-prism-cyan to-prism-magenta hover:opacity-90"
                       onClick={(e) => {
                         e.stopPropagation()
-                        router.push(`/contest/${contest.id}`)
+                        router.push(`/contest/${contest.contest_id}`)
                       }}
                     >
                       Enter Contest

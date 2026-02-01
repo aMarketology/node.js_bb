@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useAuth } from '@/app/contexts/AuthContext'
 import { useWallet } from '@/app/contexts/UnifiedWalletContext'
+import { useFanCredit } from '@/app/contexts/FanCreditContext'
 import { useRouter } from 'next/navigation'
 import Navigation from '@/app/components/Navigation'
 import Footer from '@/app/components/Footer'
@@ -10,6 +11,7 @@ import Footer from '@/app/components/Footer'
 export default function WalletPage() {
   const { user, isAuthenticated, activeWallet, activeWalletData, switchWallet, loading: authLoading } = useAuth()
   const { l1Balance, l2Balance, transactions, transferL1, withdrawToL1, bridgeToL2, mintTokens, loading: walletLoading } = useWallet()
+  const { balance: fcBalance, transactions: fcTransactions, loading: fcLoading, formatFC } = useFanCredit()
   const router = useRouter()
 
   const [withdrawAmount, setWithdrawAmount] = useState('')
@@ -125,7 +127,7 @@ export default function WalletPage() {
           <h1 className="text-4xl font-bold text-white mb-8">{walletName} Wallet</h1>
 
           {/* Balances */}
-          <div className="grid grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-3 gap-6 mb-8">
             <div className="bg-dark-lighter p-6 rounded-lg border border-gray-800">
               <h3 className="text-gray-400 text-sm mb-2">L1 Balance</h3>
               <p className="text-3xl font-bold text-white">{l1Balance.available.toFixed(2)}</p>
@@ -137,13 +139,31 @@ export default function WalletPage() {
             </div>
 
             <div className="bg-dark-lighter p-6 rounded-lg border border-gray-800">
-              <h3 className="text-gray-400 text-sm mb-2">L2 Balance</h3>
+              <h3 className="text-gray-400 text-sm mb-2">L2 Balance (BB)</h3>
               <p className="text-3xl font-bold text-prism-teal">{l2Balance.available.toFixed(2)}</p>
               <p className="text-sm text-gray-500 mt-1">Available</p>
               {l2Balance.locked > 0 && (
                 <p className="text-sm text-gray-500">Locked: {l2Balance.locked.toFixed(2)}</p>
               )}
               <p className="text-xs text-gray-600 mt-2 font-mono break-all">{l2Address}</p>
+            </div>
+
+            <div className="bg-dark-lighter p-6 rounded-lg border border-gray-800">
+              <h3 className="text-gray-400 text-sm mb-2">FanCredit (FC)</h3>
+              {fcLoading ? (
+                <p className="text-2xl text-gray-400">Loading...</p>
+              ) : fcBalance ? (
+                <>
+                  <p className="text-3xl font-bold text-purple-400">{formatFC(fcBalance.available)}</p>
+                  <p className="text-sm text-gray-500 mt-1">Available</p>
+                  {fcBalance.locked > 0 && (
+                    <p className="text-sm text-gray-500">Locked: {formatFC(fcBalance.locked)}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-2xl text-gray-400">0 FC</p>
+              )}
+              <p className="text-xs text-purple-400 mt-2">Entertainment Only</p>
             </div>
           </div>
 
@@ -252,8 +272,8 @@ export default function WalletPage() {
           )}
 
           {/* Transaction History */}
-          <div className="bg-dark-lighter p-6 rounded-lg border border-gray-800">
-            <h3 className="text-white font-semibold mb-4">Recent Transactions</h3>
+          <div className="bg-dark-lighter p-6 rounded-lg border border-gray-800 mb-8">
+            <h3 className="text-white font-semibold mb-4">Recent Transactions (BB)</h3>
             {transactions.length === 0 ? (
               <p className="text-gray-500 text-center py-4">No transactions yet</p>
             ) : (
@@ -288,6 +308,38 @@ export default function WalletPage() {
               </div>
             )}
           </div>
+
+          {/* FanCredit Transaction History */}
+          {fcTransactions && fcTransactions.length > 0 && (
+            <div className="bg-dark-lighter p-6 rounded-lg border border-gray-800">
+              <h3 className="text-white font-semibold mb-4">Recent FanCredit Transactions</h3>
+              <div className="space-y-3">
+                {fcTransactions.map((tx, index) => (
+                  <div key={tx.id || index} className="bg-dark p-4 rounded border border-gray-800 flex justify-between items-center">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-sm text-purple-400">{formatTxId(tx.id)}</span>
+                        <span className="text-xs px-2 py-1 rounded bg-purple-900/30 text-purple-400">
+                          FC
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {tx.description} • {formatTimestamp(tx.timestamp)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className={`font-semibold ${tx.to === l2Address ? 'text-green-400' : 'text-purple-400'}`}>
+                        {tx.to === l2Address ? '+' : ''}{formatFC(tx.amount)}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {tx.type}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
