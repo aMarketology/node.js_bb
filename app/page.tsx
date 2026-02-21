@@ -247,7 +247,7 @@ export default function Home() {
                       <div className="flex justify-between items-center text-sm">
                         <div>
                           <div className="text-gray-500">Volume</div>
-                          <div className="text-white font-bold">${market.totalVolume.toFixed(0)}</div>
+                          <div className="text-white font-bold">${market.totalVolume?.toFixed(0) || '0'}</div>
                         </div>
                         {market.prices && market.prices.length > 0 && (
                           <div>
